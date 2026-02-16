@@ -78,7 +78,7 @@ struct DictationPreviewCLI {
 
     private static func runMoonshineLivePreview(model: String, pythonBinary: String, scriptPath: String) {
         let statusUI = ConsoleStatusUI()
-        let writer = ConsoleFieldWriter()
+        let writer = RecordingFieldWriter(base: FocusedFieldWriter())
         let logger = ConsoleLogger()
         let meter = LiveCaptureMeter()
         let audioCapture = AudioCapture()
@@ -108,6 +108,7 @@ struct DictationPreviewCLI {
         }
 
         print("Moonshine live preview")
+        print("Focus the target text field before starting.")
         print("Press Enter to start recording.")
         _ = readLine()
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
@@ -116,12 +117,17 @@ struct DictationPreviewCLI {
         orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
         print("capture_summary \(meter.summary())")
 
-        if let inserted = writer.lastInsertedText {
-            print("inserted_text=\(inserted)")
+        if let result = writer.lastResult, result.success {
+            print("insert_result=success method=\(result.method.rawValue)")
+            if let inserted = writer.lastInsertedText {
+                print("inserted_text=\(inserted)")
+            }
         } else {
             print("error=live_transcription_failed")
             if let lastError = asrEngine.lastError {
                 print("details=\(lastError)")
+            } else if let result = writer.lastResult {
+                print("details=insertion_failed method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
             }
             if !meter.hasAudio {
                 print("hint=no_audio_frames_captured_check_mic_permissions_input_device_or_speak_longer")
@@ -196,6 +202,23 @@ private final class ConsoleFieldWriter: FocusedFieldWriting {
     func insert(_ text: String) -> InsertResult {
         lastInsertedText = text
         return .init(success: true, method: .accessibilityDirect, error: nil)
+    }
+}
+
+private final class RecordingFieldWriter: FocusedFieldWriting {
+    private let base: FocusedFieldWriting
+    private(set) var lastInsertedText: String?
+    private(set) var lastResult: InsertResult?
+
+    init(base: FocusedFieldWriting) {
+        self.base = base
+    }
+
+    func insert(_ text: String) -> InsertResult {
+        lastInsertedText = text
+        let result = base.insert(text)
+        lastResult = result
+        return result
     }
 }
 

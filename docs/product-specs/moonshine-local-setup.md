@@ -17,9 +17,10 @@ swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav --mode
 swift run DictationPreviewCLI --moonshine-live --moonshine-python "$(pwd)/.venv/bin/python3"
 ```
 Flow:
+- Focus a target text box before starting (Notes, Slack, browser textarea, VS Code editor).
 - Press Enter to start capture.
 - Speak.
-- Press Enter to stop and finalize transcription.
+- Press Enter to stop and finalize transcription. The CLI attempts focused-field insertion using AX primary and clipboard fallback.
 - During capture, the CLI prints periodic `input_meter` lines and a final `capture_summary`.
 
 Optional flags:
