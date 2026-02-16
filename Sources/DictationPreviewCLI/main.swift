@@ -1,5 +1,13 @@
 import Foundation
 import DictationAppCore
+#if canImport(Carbon)
+import Carbon
+#endif
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 @main
 struct DictationPreviewCLI {
@@ -34,7 +42,7 @@ struct DictationPreviewCLI {
             logger: logger
         )
 
-        print("Preview start")
+        emit("Preview start")
         let pressedAt = Date()
         orchestrator.handle(.shortcutPressed(.init(timestamp: pressedAt)))
 
@@ -51,12 +59,12 @@ struct DictationPreviewCLI {
         Thread.sleep(forTimeInterval: 0.22)
         orchestrator.handle(.finalTranscript(.init(text: transcript, confidence: 0.75)))
 
-        print("Preview end")
+        emit("Preview end")
         if let inserted = writer.lastInsertedText {
-            print("inserted_text=\(inserted)")
+            emit("inserted_text=\(inserted)")
         }
         for message in logger.messages {
-            print("metric \(message)")
+            emit("metric \(message)")
         }
     }
 
@@ -66,16 +74,16 @@ struct DictationPreviewCLI {
             model: model
         )
 
-        print("Moonshine preview start")
+        emit("Moonshine preview start")
         if let final = engine.transcribeWAVFile(at: wavPath) {
-            print("transcript=\(final.text)")
+            emit("transcript=\(final.text)")
         } else {
-            print("error=moonshine_transcription_failed")
+            emit("error=moonshine_transcription_failed")
             if let lastError = engine.lastError {
-                print("details=\(lastError)")
+                emit("details=\(lastError)")
             }
         }
-        print("Moonshine preview end")
+        emit("Moonshine preview end")
     }
 
     private static func runMoonshineLivePreview(model: String, pythonBinary: String, scriptPath: String) {
@@ -101,55 +109,58 @@ struct DictationPreviewCLI {
 
         audioCapture.onFrame = { frame in
             if let meterLine = meter.record(frame) {
-                print(meterLine)
+                emit(meterLine)
             }
             orchestrator.handle(.audioFrame(frame))
         }
         audioCapture.onError = { error in
-            print("capture_error=\(error.localizedDescription)")
+            emit("capture_error=\(error.localizedDescription)")
         }
 
-        print("Moonshine live preview")
-        print("Focus the target text field before starting.")
-        print("Press Enter to start recording.")
+        emit("Moonshine live preview")
+        emit("Focus the target text field before starting.")
+        emit("Press Enter to start recording.")
         _ = readLine()
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
-        print("Recording... Press Enter to stop.")
+        emit("Recording... Press Enter to stop.")
         _ = readLine()
         orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
-        print("capture_summary \(meter.summary())")
+        emit("capture_summary \(meter.summary())")
 
         if let result = writer.lastResult, result.success {
-            print("insert_result=success method=\(result.method.rawValue)")
+            emit("insert_result=success method=\(result.method.rawValue)")
             if let inserted = writer.lastInsertedText {
-                print("inserted_text=\(inserted)")
+                emit("inserted_text=\(inserted)")
             }
         } else {
-            print("error=live_transcription_failed")
+            emit("error=live_transcription_failed")
             if let lastError = asrEngine.lastError {
-                print("details=\(lastError)")
+                emit("details=\(lastError)")
             } else if let result = writer.lastResult {
-                print("details=insertion_failed method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
+                emit("details=insertion_failed method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
             }
             if !meter.hasAudio {
-                print("hint=no_audio_frames_captured_check_mic_permissions_input_device_or_speak_longer")
+                emit("hint=no_audio_frames_captured_check_mic_permissions_input_device_or_speak_longer")
             }
         }
 
         for message in logger.messages {
-            print("metric \(message)")
+            emit("metric \(message)")
         }
     }
 
     private static func runHotkeyDaemon(model: String, pythonBinary: String, scriptPath: String) {
         let statusUI = ConsoleStatusUI()
         let logger = ConsoleLogger()
+        logger.onLog = { message in
+            emit("metric \(message)")
+        }
         let writer = RecordingFieldWriter(base: FocusedFieldWriter()) { text, result in
             if result.success {
-                print("insert_result=success method=\(result.method.rawValue)")
-                print("inserted_text=\(text)")
+                emit("insert_result=success method=\(result.method.rawValue)")
+                emit("inserted_text=\(text)")
             } else {
-                print("insert_result=failure method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
+                emit("insert_result=failure method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
             }
         }
 
@@ -167,30 +178,68 @@ struct DictationPreviewCLI {
             statusUI: statusUI,
             logger: logger
         )
+        statusUI.onError = { errorCode in
+            guard errorCode == .engineError else {
+                return
+            }
+
+            if let details = asrEngine.lastError {
+                emit("details=\(details)")
+                if case .missingAudio = details {
+                    emit("hint=speak_while_holding_shortcut_and_verify_active_input_device")
+                }
+            }
+        }
 
         audioCapture.onFrame = { frame in
             orchestrator.handle(.audioFrame(frame))
         }
         audioCapture.onError = { error in
-            print("capture_error=\(error.localizedDescription)")
+            emit("capture_error=\(error.localizedDescription)")
         }
 
         let hotkeyController = HotkeyController()
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
-            sessionEventHandler: orchestrator
+            sessionEventHandler: orchestrator,
+            onForwardedEvent: { event in
+                switch event {
+                case .pressed:
+                    emit("hotkey_event=pressed")
+                case .released:
+                    emit("hotkey_event=released")
+                }
+            }
         )
 
         do {
             try bridge.start()
         } catch {
-            print("error=hotkey_start_failed details=\(error)")
+            emit("error=hotkey_start_failed details=\(error)")
             return
         }
 
-        print("hotkey_daemon=running shortcut=ctrl+option+space")
-        print("hint=focus_any_textbox_hold_ctrl_option_space_speak_release_to_insert")
+        #if canImport(Carbon)
+        emit("hotkey_daemon=running shortcuts=\(hotkeyController.shortcutSummary)")
+        emit("hotkey_backend=\(hotkeyController.backendSummary)")
+        if !hotkeyController.activeBackends.contains("event_tap") {
+            emit("warning=event_tap_unavailable_check_input_monitoring_for_terminal_host")
+        }
+        if !hotkeyController.activeBackends.contains("carbon") {
+            emit("warning=carbon_hotkey_unavailable_falling_back_to_event_tap")
+        }
+        #else
+        emit("hotkey_daemon=running shortcuts=ctrl+shift+space|ctrl+shift+d")
+        emit("hotkey_backend=none")
+        #endif
+        emit("hint=focus_any_textbox_hold_ctrl_shift_space_or_ctrl_shift_d_speak_release_to_insert")
+#if canImport(Carbon)
+        while true {
+            _ = RunCurrentEventLoop(0.25)
+        }
+#else
         RunLoop.main.run()
+#endif
     }
 }
 
@@ -255,7 +304,8 @@ private struct Arguments {
             return nil
         }
 
-        return args[next]
+        let value = args[next].trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
 
@@ -289,28 +339,33 @@ private final class RecordingFieldWriter: FocusedFieldWriting {
 }
 
 private final class ConsoleStatusUI: StatusPresenting {
+    var onError: ((FailureCode) -> Void)?
+
     func update(state: SessionState) {
-        print("state=\(state)")
+        emit("state=\(state)")
     }
 
     func showPermissionPrompt(_ snapshot: PermissionSnapshot) {
-        print("permission_prompt=\(snapshot)")
+        emit("permission_prompt=\(snapshot)")
     }
 
     func showError(_ error: FailureCode) {
-        print("error=\(error.rawValue)")
+        emit("error=\(error.rawValue)")
+        onError?(error)
     }
 
     func showPartialTranscript(_ text: String) {
-        print("partial=\(text)")
+        emit("partial=\(text)")
     }
 }
 
 private final class ConsoleLogger: Logging {
     private(set) var messages: [String] = []
+    var onLog: ((String) -> Void)?
 
     func log(_ message: String) {
         messages.append(message)
+        onLog?(message)
     }
 }
 
@@ -366,4 +421,9 @@ private final class LiveCaptureMeter {
 
         return sqrt(energy / Double(samples.count))
     }
+}
+
+private func emit(_ line: String) {
+    Swift.print(line)
+    fflush(stdout)
 }

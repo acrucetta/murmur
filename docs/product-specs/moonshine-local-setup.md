@@ -6,6 +6,12 @@ Use this to enable local WAV transcription in the preview CLI.
 ```bash
 pip install useful-moonshine-onnx
 ```
+If Homebrew Python blocks global installs (`externally-managed-environment`), use a venv:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install useful-moonshine-onnx
+```
 
 ## 2) Run Moonshine preview against a WAV file
 ```bash
@@ -28,12 +34,18 @@ Flow:
 swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3"
 ```
 
-Default hotkey:
-- `Ctrl + Option + Space` (hold to talk, release to insert)
+Default hotkeys:
+- `Ctrl + Shift + Space` (primary)
+- `Ctrl + Shift + D` (backup)
 
 Background example:
 ```bash
 nohup swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3" > /tmp/murmur-daemon.log 2>&1 &
+```
+Lower-latency restart example (skips `swift run` build step):
+```bash
+swift build
+nohup ./.build/debug/DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3" > /tmp/murmur-daemon.log 2>&1 &
 ```
 
 Optional flags:
@@ -43,3 +55,23 @@ Optional flags:
 ## Notes
 - This path is fully local/offline after model assets are available on disk.
 - Live mode quality depends on local microphone/input settings and speaking during capture window.
+
+## Troubleshooting daemon/hotkeys
+Check logs in another terminal:
+```bash
+tail -f /tmp/murmur-daemon.log
+```
+Expected startup lines:
+- `hotkey_daemon=running shortcuts=ctrl+shift+space|ctrl+shift+d`
+- `hotkey_backend=carbon+event_tap` (or `carbon` / `event_tap` depending on permissions/runtime)
+- `hint=focus_any_textbox_hold_ctrl_shift_space_or_ctrl_shift_d_speak_release_to_insert`
+
+Expected hotkey activity:
+- `hotkey_event=pressed`
+- `state=listening`
+- `hotkey_event=released`
+- `state=finalizing`
+
+If startup fails, check for:
+- `error=hotkey_start_failed ... eventHotKeyExistsErr` (another process already owns this shortcut).
+- `error=hotkey_start_failed ... eventInternalErr` (environment issue; test in a normal interactive terminal session).

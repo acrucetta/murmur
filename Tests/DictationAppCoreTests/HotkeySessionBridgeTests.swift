@@ -35,6 +35,26 @@ struct HotkeySessionBridgeTests {
 
         #expect(hotkey.stopCallCount == 1)
     }
+
+    @Test
+    func emitsForwardedEventDiagnostics() throws {
+        let hotkey = HotkeyControllerFake()
+        let session = SessionEventHandlerSpy()
+        var forwarded: [HotkeySessionBridge.ForwardedEvent] = []
+        let bridge = HotkeySessionBridge(
+            hotkeyController: hotkey,
+            sessionEventHandler: session,
+            onForwardedEvent: { forwarded.append($0) }
+        )
+
+        try bridge.start()
+        hotkey.emitPressed()
+        hotkey.emitReleased()
+
+        #expect(forwarded.count == 2)
+        #expect(forwarded[0] == .pressed)
+        #expect(forwarded[1] == .released)
+    }
 }
 
 private final class HotkeyControllerFake: HotkeyControlling {

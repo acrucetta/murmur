@@ -93,6 +93,10 @@ public final class SessionOrchestrator {
     }
 
     private func handleShortcutPressed(_ event: SessionEvent) {
+        if isErrorState(state) {
+            transition(.reset)
+        }
+
         let permissions = permissionManager.currentStatus()
         guard permissions.allGranted else {
             permissionManager.requestMissingPermissions()

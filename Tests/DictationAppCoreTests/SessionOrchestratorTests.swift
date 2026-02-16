@@ -122,6 +122,32 @@ struct SessionOrchestratorTests {
     }
 
     @Test
+    func pressAfterEngineErrorRecoversToListening() {
+        let asr = FakeASREngine()
+        asr.providesFinalTranscriptOnStopValue = true
+        let audio = FakeAudioCapture()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: audio,
+            asrEngine: asr,
+            postProcessor: DeterministicTextPostProcessor(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            logger: NoopLogger()
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+        #expect(orchestrator.state == .error(.engineError))
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        #expect(orchestrator.state == .listening)
+        #expect(audio.startCallCount == 2)
+        #expect(asr.startCallCount == 2)
+    }
+
+    @Test
     func moonshineBackendFinalizationFlowsToInsertion() {
         let asr = MoonshineProcessASREngine(
             command: ["python3", "scripts/moonshine_transcribe.py"],
