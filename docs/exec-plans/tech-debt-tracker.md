@@ -3,8 +3,8 @@
 ## Open Items
 
 1. Replace stubbed macOS integrations with real implementations.
-- Areas: `Modules/Hotkey`, `Modules/Permissions`, `Modules/ASR`.
-- Why: insertion and live capture bridges now exist, but other runtime integrations are still incomplete.
+- Areas: `Modules/Permissions`, `Modules/ASR`.
+- Why: hotkey and insertion/live capture bridges now exist, but permission onboarding and ASR robustness are still incomplete.
 
 2. Harden live microphone capture quality and permission UX.
 - Areas: `Modules/Audio`, `DictationPreviewCLI`, `Modules/Permissions`.

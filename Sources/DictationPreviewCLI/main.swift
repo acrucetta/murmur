@@ -12,6 +12,8 @@ struct DictationPreviewCLI {
             runMoonshinePreview(wavPath: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
         case .moonshineLive(let model, let pythonBinary, let scriptPath):
             runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
+        case .hotkeyDaemon(let model, let pythonBinary, let scriptPath):
+            runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
         case .invalid:
             print(Arguments.usage)
         }
@@ -138,6 +140,58 @@ struct DictationPreviewCLI {
             print("metric \(message)")
         }
     }
+
+    private static func runHotkeyDaemon(model: String, pythonBinary: String, scriptPath: String) {
+        let statusUI = ConsoleStatusUI()
+        let logger = ConsoleLogger()
+        let writer = RecordingFieldWriter(base: FocusedFieldWriter()) { text, result in
+            if result.success {
+                print("insert_result=success method=\(result.method.rawValue)")
+                print("inserted_text=\(text)")
+            } else {
+                print("insert_result=failure method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
+            }
+        }
+
+        let audioCapture = AudioCapture()
+        let asrEngine = MoonshineProcessASREngine(
+            command: [pythonBinary, scriptPath],
+            model: model
+        )
+        let orchestrator = SessionOrchestrator(
+            permissionManager: PermissionManager(initialSnapshot: .allGranted),
+            audioCapture: audioCapture,
+            asrEngine: asrEngine,
+            postProcessor: DeterministicTextPostProcessor(),
+            fieldWriter: writer,
+            statusUI: statusUI,
+            logger: logger
+        )
+
+        audioCapture.onFrame = { frame in
+            orchestrator.handle(.audioFrame(frame))
+        }
+        audioCapture.onError = { error in
+            print("capture_error=\(error.localizedDescription)")
+        }
+
+        let hotkeyController = HotkeyController()
+        let bridge = HotkeySessionBridge(
+            hotkeyController: hotkeyController,
+            sessionEventHandler: orchestrator
+        )
+
+        do {
+            try bridge.start()
+        } catch {
+            print("error=hotkey_start_failed details=\(error)")
+            return
+        }
+
+        print("hotkey_daemon=running shortcut=ctrl+option+space")
+        print("hint=focus_any_textbox_hold_ctrl_option_space_speak_release_to_insert")
+        RunLoop.main.run()
+    }
 }
 
 private struct Arguments {
@@ -145,6 +199,7 @@ private struct Arguments {
         case simulate(String)
         case moonshineWAV(path: String, model: String, pythonBinary: String, scriptPath: String)
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
+        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String)
         case invalid
     }
 
@@ -153,6 +208,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --simulate "hello world"
       swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --moonshine-live [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --hotkey-daemon [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
     """
 
     let mode: Mode
@@ -177,6 +233,13 @@ private struct Arguments {
             let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
             let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
             return Arguments(mode: .moonshineLive(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
+        }
+
+        if rawArgs.contains("--hotkey-daemon") {
+            let model = value(after: "--model", in: rawArgs) ?? "moonshine/tiny"
+            let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
+            let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
+            return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 
         return Arguments(mode: .invalid)
@@ -207,17 +270,20 @@ private final class ConsoleFieldWriter: FocusedFieldWriting {
 
 private final class RecordingFieldWriter: FocusedFieldWriting {
     private let base: FocusedFieldWriting
+    private let onInsert: ((String, InsertResult) -> Void)?
     private(set) var lastInsertedText: String?
     private(set) var lastResult: InsertResult?
 
-    init(base: FocusedFieldWriting) {
+    init(base: FocusedFieldWriting, onInsert: ((String, InsertResult) -> Void)? = nil) {
         self.base = base
+        self.onInsert = onInsert
     }
 
     func insert(_ text: String) -> InsertResult {
         lastInsertedText = text
         let result = base.insert(text)
         lastResult = result
+        onInsert?(text, result)
         return result
     }
 }

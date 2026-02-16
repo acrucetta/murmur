@@ -1,13 +1,13 @@
 # Current Architecture (ASCII)
 
-This reflects implemented Phase 2 + Phase 3 slices.
+This reflects implemented Phase 2 + Phase 3 + Phase 4 slices.
 
 ```text
 User shortcut
     |
     v
 +---------------------+
-|   HotkeyController  |  (stub)
+|   HotkeyController  |  (global Carbon listener)
 +---------------------+
     | ShortcutPressed / ShortcutReleased
     v
@@ -58,6 +58,9 @@ Moonshine bridge:
 Live bridge:
   DictationPreviewCLI --moonshine-live -> AudioCapture (AVAudioEngine frames)
   -> SessionOrchestrator .audioFrame -> MoonshineProcessASREngine finalize
+Hotkey daemon bridge:
+  DictationPreviewCLI --hotkey-daemon -> HotkeySessionBridge
+  -> SessionOrchestrator shortcut events
 Insertion backends:
   AccessibilityDirectInserter -> kAXSelectedText / kAXValue
   ClipboardFallbackInserter -> pasteboard snapshot + Cmd+V + restore

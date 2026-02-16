@@ -23,6 +23,19 @@ Flow:
 - Press Enter to stop and finalize transcription. The CLI attempts focused-field insertion using AX primary and clipboard fallback.
 - During capture, the CLI prints periodic `input_meter` lines and a final `capture_summary`.
 
+## 4) Run as global hotkey daemon (background-friendly)
+```bash
+swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3"
+```
+
+Default hotkey:
+- `Ctrl + Option + Space` (hold to talk, release to insert)
+
+Background example:
+```bash
+nohup swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3" > /tmp/murmur-daemon.log 2>&1 &
+```
+
 Optional flags:
 - `--moonshine-python /path/to/python3`
 - `--moonshine-script /path/to/scripts/moonshine_transcribe.py`
