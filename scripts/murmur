@@ -14,6 +14,7 @@ COMMAND_NAME="${0##*/}"
 usage() {
   cat <<USAGE
 Usage:
+  ${COMMAND_NAME} setup [--python <python3>] [--skip-model-download] [--global]
   ${COMMAND_NAME} run [--model <id>]
   ${COMMAND_NAME} start [--model <id>]
   ${COMMAND_NAME} stop
@@ -26,12 +27,13 @@ Usage:
   ${COMMAND_NAME} shortcut set [combo]
   ${COMMAND_NAME} shortcut reset
   ${COMMAND_NAME} doctor
-  ${COMMAND_NAME} install
+  ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
   ${COMMAND_NAME} uninstall
 
 Environment overrides:
   MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
   MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
+  MURMUR_SETUP_PYTHON      Python executable used by setup (default: python3)
   MURMUR_SHORTCUT          Hotkey combo override (for example: ctrl+shift+space)
   MURMUR_TRANSCRIPTS_DIR   Transcription history folder (default: ~/Library/Application Support/Murmur/transcriptions)
   MURMUR_CONFIG_DIR        Config folder (default: ~/Library/Application Support/Murmur)
@@ -223,6 +225,17 @@ ensure_capture_build() {
   (cd "$ROOT_DIR" && swift build --product DictationPreviewCLI >/dev/null)
 }
 
+ensure_swift_ready() {
+  if command -v swift >/dev/null 2>&1 && swift --version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "swift toolchain is required but was not found." >&2
+  echo "install Xcode Command Line Tools, then retry:" >&2
+  echo "  xcode-select --install" >&2
+  return 1
+}
+
 is_running() {
   if [[ ! -f "$PID_FILE" ]]; then
     return 1
@@ -349,6 +362,184 @@ doctor() {
   fi
 }
 
+setup_usage() {
+  cat <<USAGE
+Usage:
+  ${COMMAND_NAME} setup
+  ${COMMAND_NAME} setup --global
+  ${COMMAND_NAME} setup --python /opt/homebrew/bin/python3
+  ${COMMAND_NAME} setup --skip-model-download
+
+Options:
+  --python <path|name>      Python executable used to create .venv
+  --skip-model-download     Skip Moonshine model download
+  --global                  Also install global '${COMMAND_NAME}' command
+USAGE
+}
+
+setup_environment() {
+  local setup_python="${MURMUR_SETUP_PYTHON:-python3}"
+  local install_global=0
+  local skip_model_download=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --python)
+      if [[ $# -lt 2 ]]; then
+        echo "setup option --python requires a value" >&2
+        return 2
+      fi
+      setup_python="$2"
+      shift 2
+      ;;
+    --skip-model-download)
+      skip_model_download=1
+      shift
+      ;;
+    --global)
+      install_global=1
+      shift
+      ;;
+    -h|--help)
+      setup_usage
+      return 0
+      ;;
+    *)
+      echo "unknown setup option: $1" >&2
+      setup_usage >&2
+      return 2
+      ;;
+    esac
+  done
+
+  if ! command -v "$setup_python" >/dev/null 2>&1; then
+    echo "python executable not found: $setup_python" >&2
+    echo "set MURMUR_SETUP_PYTHON or pass --python to choose a valid interpreter" >&2
+    return 1
+  fi
+
+  ensure_swift_ready
+
+  local venv_dir="$ROOT_DIR/.venv"
+  local venv_python="$venv_dir/bin/python3"
+
+  if [[ -x "$venv_python" ]]; then
+    echo "[1/5] reusing virtual environment: $venv_dir"
+  else
+    echo "[1/5] creating virtual environment: $venv_dir"
+    "$setup_python" -m venv "$venv_dir"
+  fi
+
+  if [[ ! -x "$venv_python" ]]; then
+    echo "expected python not found at $venv_python after venv creation" >&2
+    return 1
+  fi
+
+  echo "[2/5] upgrading pip in .venv"
+  "$venv_python" -m pip install --upgrade pip
+
+  echo "[3/5] installing moonshine dependencies"
+  "$venv_python" -m pip install moonshine-voice useful-moonshine-onnx
+
+  if [[ "$skip_model_download" -eq 1 ]]; then
+    echo "[4/5] skipping model download (--skip-model-download)"
+  else
+    echo "[4/5] downloading moonshine english model"
+    "$venv_python" -m moonshine_voice.download --language en
+  fi
+
+  echo "[5/5] building Murmur app binary"
+  ensure_build
+
+  if [[ "$install_global" -eq 1 ]]; then
+    install_cli
+  fi
+
+  if [[ "$install_global" -eq 1 ]]; then
+    cat <<GUIDE
+
+setup complete.
+next steps:
+  1) murmur doctor
+  2) murmur run
+GUIDE
+  else
+    cat <<GUIDE
+
+setup complete.
+next steps:
+  1) ./murmur doctor
+  2) ./murmur run
+GUIDE
+    echo "optional: run '${COMMAND_NAME} install' to use 'murmur' from anywhere"
+  fi
+}
+
+install_usage() {
+  cat <<USAGE
+Usage:
+  ${COMMAND_NAME} install
+  ${COMMAND_NAME} install --python /opt/homebrew/bin/python3
+  ${COMMAND_NAME} install --skip-model-download
+  ${COMMAND_NAME} install --link-only
+
+Behavior:
+  Default install runs full setup (venv, deps, model download, app build)
+  and installs global '${COMMAND_NAME}' command.
+
+Options:
+  --python <path|name>      Python executable used to create .venv
+  --skip-model-download     Skip Moonshine model download
+  --link-only               Only install global '${COMMAND_NAME}' symlink
+USAGE
+}
+
+install_command() {
+  local link_only=0
+  local setup_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --python)
+      if [[ $# -lt 2 ]]; then
+        echo "install option --python requires a value" >&2
+        return 2
+      fi
+      setup_args+=("--python" "$2")
+      shift 2
+      ;;
+    --skip-model-download)
+      setup_args+=("--skip-model-download")
+      shift
+      ;;
+    --link-only)
+      link_only=1
+      shift
+      ;;
+    -h|--help)
+      install_usage
+      return 0
+      ;;
+    *)
+      echo "unknown install option: $1" >&2
+      install_usage >&2
+      return 2
+      ;;
+    esac
+  done
+
+  if [[ "$link_only" -eq 1 ]]; then
+    if [[ ${#setup_args[@]} -gt 0 ]]; then
+      echo "--link-only cannot be combined with other install options" >&2
+      return 2
+    fi
+    install_cli
+    return 0
+  fi
+
+  setup_environment "${setup_args[@]}" --global
+}
+
 install_cli() {
   local install_dir="${MURMUR_BIN_DIR:-$HOME/.local/bin}"
   mkdir -p "$install_dir"
@@ -374,6 +565,9 @@ if [[ $# -gt 0 ]]; then
 fi
 
 case "$cmd" in
+setup)
+  setup_environment "$@"
+  ;;
 run)
   run_fg "$@"
   ;;
@@ -407,7 +601,7 @@ doctor)
   doctor
   ;;
 install)
-  install_cli
+  install_command "$@"
   ;;
 uninstall)
   uninstall_cli

@@ -19,31 +19,55 @@ Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the f
 
 ## Install
 
-### 1) Clone + Python env
+### 1) Clone
 
 ```bash
 git clone git@github.com:acrucetta/murmur.git
 cd murmur
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install moonshine-voice useful-moonshine-onnx
-python -m moonshine_voice.download --language en
 ```
 
-### 2) Build and test
+### 2) One-command install (recommended)
+
+```bash
+./murmur install
+```
+
+This does everything needed to run:
+- creates/reuses `.venv`
+- installs Moonshine Python dependencies
+- downloads the English Moonshine model
+- builds the Murmur app binary
+- installs global `murmur` command
+
+### 3) Run
+
+```bash
+murmur run
+```
+
+Optional local-only setup (no global command):
+
+```bash
+./murmur setup
+./murmur run
+```
+
+### 4) Development verification (optional)
 
 ```bash
 swift build
 swift test
 ```
 
-### 3) Install CLI command globally (optional)
+If you used local-only setup, use `./murmur ...` for commands shown below.
 
-```bash
-./murmur install
-```
+### Installer Notes
 
-After this, use `murmur ...` from anywhere.
+- `./murmur install` is safe to rerun. It reuses `.venv` and only refreshes what is needed.
+- First install needs internet access for package/model download.
+- If your Python executable is non-standard, use `./murmur install --python /absolute/path/to/python3`.
+- If `murmur` is not found after install, add `~/.local/bin` to `PATH` or run `./murmur install --link-only`.
+- On first launch, macOS may ask for `Microphone`, `Accessibility`, and `Input Monitoring` permissions.
 
 ## Quick Start
 
@@ -142,12 +166,14 @@ User Hotkey
 
 ```bash
 murmur run
+murmur setup [--python <python3>] [--skip-model-download] [--global]
 murmur start|stop|restart|status|logs
 murmur shortcut get|set [combo]|reset
 murmur history [lines]
 murmur history-path
 murmur doctor
-murmur install|uninstall
+murmur install [--python <python3>] [--skip-model-download] [--link-only]
+murmur uninstall
 ```
 
 ## Troubleshooting
