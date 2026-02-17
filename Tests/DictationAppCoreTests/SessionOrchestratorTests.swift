@@ -277,6 +277,42 @@ struct SessionOrchestratorTests {
         #expect(feedback.recordingStartCount == 0)
         #expect(feedback.recordingStopCount == 0)
     }
+
+    @Test
+    func appliesSmartRewriteWithProvidedContextBeforeInsert() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "ship tomorrow", confidence: 0.8)
+        let writer = FakeFieldWriter()
+        let rewriter = RewriteSpy(nextResult: "Ship on Friday.")
+        let contextProvider = FixedRewriteContextProvider(
+            context: .init(
+                frontmostAppBundleID: "com.apple.mail",
+                frontmostAppName: "Mail",
+                mode: "smart"
+            )
+        )
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(mode: .literal),
+            transcriptRewriter: rewriter,
+            rewriteContextProvider: contextProvider,
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: NoopLogger()
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(rewriter.callCount == 1)
+        #expect(rewriter.lastInput == "Ship tomorrow.")
+        #expect(rewriter.lastContext?.frontmostAppBundleID == "com.apple.mail")
+        #expect(rewriter.lastContext?.mode == "smart")
+        #expect(writer.lastInsertedText == "Ship on Friday.")
+    }
 }
 
 private final class FakePermissionManager: PermissionManaging {
@@ -376,5 +412,31 @@ private final class ClockSequence {
             return fallback
         }
         return values.removeFirst()
+    }
+}
+
+private final class RewriteSpy: TranscriptRewriting {
+    var callCount = 0
+    var lastInput: String?
+    var lastContext: RewriteContext?
+    var nextResult: String?
+
+    init(nextResult: String?) {
+        self.nextResult = nextResult
+    }
+
+    func rewrite(_ text: String, context: RewriteContext) -> String? {
+        callCount += 1
+        lastInput = text
+        lastContext = context
+        return nextResult
+    }
+}
+
+private struct FixedRewriteContextProvider: RewriteContextProviding {
+    let context: RewriteContext
+
+    func currentContext() -> RewriteContext {
+        context
     }
 }
