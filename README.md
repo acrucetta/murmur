@@ -73,6 +73,12 @@ murmur shortcut get
 Set a new primary shortcut:
 
 ```bash
+murmur shortcut set
+```
+
+Or set it directly by identifier:
+
+```bash
 murmur shortcut set "ctrl+option+space"
 ```
 
@@ -85,6 +91,7 @@ murmur shortcut reset
 Notes:
 - Primary default: `ctrl+shift+space`
 - Backup remains enabled: `ctrl+shift+d`
+- `murmur shortcut set` starts a key listener and prompts for confirmation.
 - Restart Murmur after changing shortcut.
 
 ## Transcript History
@@ -136,7 +143,7 @@ User Hotkey
 ```bash
 murmur run
 murmur start|stop|restart|status|logs
-murmur shortcut get|set <combo>|reset
+murmur shortcut get|set [combo]|reset
 murmur history [lines]
 murmur history-path
 murmur doctor

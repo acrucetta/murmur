@@ -58,4 +58,14 @@ struct HotkeyControllerTests {
         #expect(HotkeyShortcut.parse(identifier: "ctrl+shift+f13") == nil)
 #endif
     }
+
+    @Test
+    func roundTripsShortcutIdentifier() {
+#if canImport(Carbon)
+        let original = HotkeyShortcut(keyCode: UInt32(kVK_ANSI_K), modifiers: UInt32(controlKey | optionKey))
+        let identifier = original.identifier
+        let parsed = HotkeyShortcut.parse(identifier: identifier)
+        #expect(parsed == original)
+#endif
+    }
 }

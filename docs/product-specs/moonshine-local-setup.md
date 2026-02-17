@@ -135,6 +135,7 @@ murmur doctor
 Shortcut config:
 ```bash
 murmur shortcut get
+murmur shortcut set
 murmur shortcut set "ctrl+option+space"
 murmur shortcut reset
 ```
