@@ -8,6 +8,8 @@ public final class SessionOrchestrator {
     private let audioCapture: AudioCapturing
     private let asrEngine: ASREngining
     private let postProcessor: TextPostProcessing
+    private let transcriptRewriter: TranscriptRewriting
+    private let rewriteContextProvider: RewriteContextProviding
     private let fieldWriter: FocusedFieldWriting
     private let statusUI: StatusPresenting
     private let feedback: FeedbackPresenting
@@ -27,6 +29,10 @@ public final class SessionOrchestrator {
         audioCapture: AudioCapturing,
         asrEngine: ASREngining,
         postProcessor: TextPostProcessing,
+        transcriptRewriter: TranscriptRewriting = NoopTranscriptRewriter(),
+        rewriteContextProvider: RewriteContextProviding = StaticRewriteContextProvider(
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: TranscriptRewriteMode.smart.rawValue)
+        ),
         fieldWriter: FocusedFieldWriting,
         statusUI: StatusPresenting,
         feedback: FeedbackPresenting = NoopFeedbackPresenter(),
@@ -39,6 +45,8 @@ public final class SessionOrchestrator {
         self.audioCapture = audioCapture
         self.asrEngine = asrEngine
         self.postProcessor = postProcessor
+        self.transcriptRewriter = transcriptRewriter
+        self.rewriteContextProvider = rewriteContextProvider
         self.fieldWriter = fieldWriter
         self.statusUI = statusUI
         self.feedback = feedback
@@ -82,11 +90,16 @@ public final class SessionOrchestrator {
             if state == .inserting {
                 logReleaseToFinalLatencyIfPossible()
                 let cleaned = postProcessor.clean(finalTranscript.text)
-                let insertResult = fieldWriter.insert(cleaned)
+                let rewriteContext = rewriteContextProvider.currentContext()
+                let rewritten = transcriptRewriter
+                    .rewrite(cleaned, context: rewriteContext)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let textToInsert = rewritten.flatMap { $0.isEmpty ? nil : $0 } ?? cleaned
+                let insertResult = fieldWriter.insert(textToInsert)
                 transcriptHistory.record(
                     .init(
                         timestamp: releaseTimestamp ?? now(),
-                        transcript: cleaned,
+                        transcript: textToInsert,
                         insertResult: insertResult
                     )
                 )

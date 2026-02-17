@@ -14,6 +14,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.overlayWarning {
             Swift.print("warning=\(warning)")
         }
+        if let warning = arguments.rewriteWarning {
+            Swift.print("warning=\(warning)")
+        }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
@@ -21,7 +24,10 @@ struct MurmurMenuBarApp {
             pythonBinary: arguments.pythonBinary,
             scriptPath: arguments.scriptPath,
             hotkeyShortcuts: arguments.hotkeyShortcuts,
-            overlayPreviewState: arguments.overlayPreviewState
+            overlayPreviewState: arguments.overlayPreviewState,
+            rewriteMode: arguments.rewriteMode,
+            openRouterModel: arguments.openRouterModel,
+            openRouterAPIKey: arguments.openRouterAPIKey
         )
 
         let delegate = AppDelegate(
@@ -49,6 +55,10 @@ private struct Arguments {
     let shortcutWarning: String?
     let overlayPreviewState: OverlayPreviewState?
     let overlayWarning: String?
+    let rewriteMode: TranscriptRewriteMode
+    let openRouterModel: String
+    let openRouterAPIKey: String?
+    let rewriteWarning: String?
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         let currentDirectory = FileManager.default.currentDirectoryPath
@@ -57,6 +67,10 @@ private struct Arguments {
         let shortcutResolution = resolveHotkeyShortcuts(shortcutIdentifier: shortcutIdentifier)
         let overlayPreviewResolution = resolveOverlayPreviewState(
             previewIdentifier: value(after: "--overlay-preview", in: rawArgs)
+        )
+        let rewriteResolution = resolveRewriteMode(
+            explicit: value(after: "--rewrite-mode", in: rawArgs),
+            environment: environment
         )
 
         return Arguments(
@@ -74,7 +88,11 @@ private struct Arguments {
             hotkeyShortcuts: shortcutResolution.shortcuts,
             shortcutWarning: shortcutResolution.warning,
             overlayPreviewState: overlayPreviewResolution.state,
-            overlayWarning: overlayPreviewResolution.warning
+            overlayWarning: overlayPreviewResolution.warning,
+            rewriteMode: rewriteResolution.mode,
+            openRouterModel: resolveOpenRouterModel(explicit: value(after: "--openrouter-model", in: rawArgs), environment: environment),
+            openRouterAPIKey: resolveOpenRouterAPIKey(explicit: value(after: "--openrouter-api-key", in: rawArgs), environment: environment),
+            rewriteWarning: rewriteResolution.warning
         )
     }
 
@@ -122,6 +140,61 @@ private struct Arguments {
 
         return (previewState, nil)
     }
+
+    private static func resolveRewriteMode(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (mode: TranscriptRewriteMode, warning: String?) {
+        if let explicit {
+            guard let parsed = TranscriptRewriteMode.parse(explicit) else {
+                return (.smart, "invalid rewrite mode '\(explicit)'; expected literal|smart")
+            }
+            return (parsed, nil)
+        }
+
+        if let envValue = environment["MURMUR_REWRITE_MODE"], !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let parsed = TranscriptRewriteMode.parse(envValue) else {
+                return (.smart, "invalid MURMUR_REWRITE_MODE '\(envValue)'; expected literal|smart")
+            }
+            return (parsed, nil)
+        }
+
+        return (.smart, nil)
+    }
+
+    private static func resolveOpenRouterModel(explicit: String?, environment: [String: String]) -> String {
+        if let explicit, !explicit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return explicit
+        }
+        if let envValue = environment["MURMUR_OPENROUTER_MODEL"], !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return envValue
+        }
+        return "mistralai/mistral-small-3.1-24b-instruct"
+    }
+
+    private static func resolveOpenRouterAPIKey(explicit: String?, environment: [String: String]) -> String? {
+        if let explicit {
+            let trimmed = explicit.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        if let envValue = environment["MURMUR_OPENROUTER_API_KEY"] {
+            let trimmed = envValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        if let envValue = environment["OPENROUTER_API_KEY"] {
+            let trimmed = envValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return nil
+    }
+
 }
 
 @MainActor
@@ -143,7 +216,10 @@ private final class MenuBarRuntime {
         pythonBinary: String,
         scriptPath: String,
         hotkeyShortcuts: [HotkeyShortcut],
-        overlayPreviewState: OverlayPreviewState?
+        overlayPreviewState: OverlayPreviewState?,
+        rewriteMode: TranscriptRewriteMode,
+        openRouterModel: String,
+        openRouterAPIKey: String?
     ) {
         self.menuBarController = menuBarController
         self.overlayPreviewState = overlayPreviewState
@@ -161,6 +237,27 @@ private final class MenuBarRuntime {
             command: [pythonBinary, scriptPath],
             model: model
         )
+        let contextProvider = AppRewriteContextProvider(mode: rewriteMode)
+        let transcriptRewriter: TranscriptRewriting
+        if rewriteMode == .smart,
+           let openRouterAPIKey,
+           !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            transcriptRewriter = OpenRouterTranscriptRewriter(
+                config: .init(
+                    apiKey: openRouterAPIKey,
+                    model: openRouterModel
+                ),
+                logger: logger
+            )
+            logger.log("smart_rewrite_enabled provider=openrouter model=\(openRouterModel)")
+        } else {
+            transcriptRewriter = NoopTranscriptRewriter()
+            if rewriteMode == .smart {
+                logger.log("smart_rewrite_disabled reason=missing_api_key")
+            }
+        }
+        let postProcessorMode: TextPostProcessorV2.Mode = rewriteMode == .literal ? .literal : .smart
         let feedback = AppFeedbackPresenter(
             onRecordingStarted: {
                 overlayController.update(state: .listening)
@@ -176,7 +273,9 @@ private final class MenuBarRuntime {
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
             asrEngine: asrEngine,
-            postProcessor: TextPostProcessorV2(),
+            postProcessor: TextPostProcessorV2(mode: postProcessorMode),
+            transcriptRewriter: transcriptRewriter,
+            rewriteContextProvider: contextProvider,
             fieldWriter: FocusedFieldWriter(),
             statusUI: statusUI,
             feedback: feedback,
@@ -329,6 +428,19 @@ private final class MenuBarStatusUI: StatusPresenting {
 private final class MenuBarLogger: Logging {
     func log(_ message: String) {
         Swift.print("metric \(message)")
+    }
+}
+
+private struct AppRewriteContextProvider: RewriteContextProviding {
+    let mode: TranscriptRewriteMode
+
+    func currentContext() -> RewriteContext {
+        let app = NSWorkspace.shared.frontmostApplication
+        return .init(
+            frontmostAppBundleID: app?.bundleIdentifier,
+            frontmostAppName: app?.localizedName,
+            mode: mode.rawValue
+        )
     }
 }
 

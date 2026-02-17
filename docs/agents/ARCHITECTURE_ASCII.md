@@ -1,6 +1,6 @@
 # Current Architecture (ASCII)
 
-This reflects the current shipped runtime (hotkey + Moonshine + insertion fallback + menu bar feedback).
+This reflects the current shipped runtime (hotkey + Moonshine + insertion fallback + optional smart rewrite + menu bar feedback).
 
 ```text
 User shortcut
@@ -51,6 +51,12 @@ User shortcut
                               +----------------------+
                               | TextPostProcessorV2  |
                               +----------------------+
+                                     |
+                                     v
+                         +-----------------------------+
+                         | Optional TranscriptRewriter |
+                         | OpenRouter (smart mode)     |
+                         +-----------------------------+
                                      |
                                      v
                               +----------------------+
