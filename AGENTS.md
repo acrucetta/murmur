@@ -30,5 +30,5 @@ Repository operating guide for future agents. Keep this file short and map-like.
 - External pattern notes: `docs/agents/REFERENCE_NOTES.md`
 
 ## 4) Current Phase
-- Phase 1 foundation exists (state machine, orchestrator, module stubs, core tests).
-- Next phase focus: real audio + ASR path with latency instrumentation.
+- Core runtime is shipped: global hotkey flow, Moonshine local ASR bridge, insertion fallback, menu bar app, transcript history, shortcut CLI, one-command install, and recording feedback cues.
+- Next phase focus: dictation quality/parity work (disfluency robustness, dictionary/context features) per `docs/product-specs/wisprflow-feature-gap-roadmap.md`.

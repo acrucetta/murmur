@@ -1,6 +1,6 @@
 # Current Architecture (ASCII)
 
-This reflects implemented Phase 2 + Phase 3 + Phase 4 slices.
+This reflects the current shipped runtime (hotkey + Moonshine + insertion fallback + menu bar feedback).
 
 ```text
 User shortcut
@@ -19,8 +19,19 @@ User shortcut
     v                               v
 +---------------------+        +---------------------+
 |  PermissionManager  |        |      StatusUI       |
-| runtime checks flow |        | menu + cli feedback |
+| runtime checks flow |        | menu bar state text |
 +---------------------+        +---------------------+
+    | feedback events
+    v
+ +-----------------------+
+ |   FeedbackPresenter   |
+ | start/stop cues only  |
+ +-----------------------+
+    | concrete runtime
+    v
+ +-----------------------+
+ | AppKit sound + haptic |
+ +-----------------------+
     | granted
     v
 +---------------------+        +------------------------------+
@@ -51,6 +62,10 @@ User shortcut
                                 InsertResult
 
 Cross-cutting: SettingsStore, Logger
+Feedback contract:
+  SessionOrchestrator -> FeedbackPresenter (.recordingStarted/.recordingStopped)
+  Menu bar app runtime plays bundled custom WAV cues + haptics
+  Non-GUI runtime uses no-op presenter (no terminal bell)
 Fast loop: DictationPreviewCLI (simulated transcript path)
 Moonshine bridge:
   DictationPreviewCLI --moonshine-wav <file> -> MoonshineProcessASREngine
