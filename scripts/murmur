@@ -46,6 +46,13 @@ trim() {
   printf '%s' "$value"
 }
 
+drain_tty_input() {
+  if [[ ! -t 0 ]]; then
+    return
+  fi
+  while IFS= read -r -s -n 1 -t 0.01 _; do :; done
+}
+
 resolve_python() {
   local env_python="${MURMUR_MOONSHINE_PYTHON:-}"
   env_python="$(trim "$env_python")"
@@ -136,7 +143,7 @@ shortcut_set() {
 
     ensure_capture_build
     local capture_output
-    if ! capture_output="$("$ROOT_DIR/.build/debug/DictationPreviewCLI" --capture-shortcut)"; then
+    if ! capture_output="$("$ROOT_DIR/.build/debug/DictationPreviewCLI" --capture-shortcut < /dev/tty)"; then
       echo "shortcut capture failed" >&2
       return 1
     fi
@@ -152,7 +159,11 @@ shortcut_set() {
 
     shortcut="$captured"
     echo "captured shortcut: $shortcut"
-    read -r -p "Use this shortcut? [y/N] " confirm
+    drain_tty_input
+    if ! read -r -p "Use this shortcut? [y/N] " confirm < /dev/tty; then
+      echo "shortcut update cancelled"
+      return 1
+    fi
     case "${confirm:-}" in
       y|Y|yes|YES)
         ;;
