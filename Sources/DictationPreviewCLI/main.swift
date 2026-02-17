@@ -20,8 +20,8 @@ struct DictationPreviewCLI {
             runMoonshinePreview(wavPath: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
         case .moonshineLive(let model, let pythonBinary, let scriptPath):
             runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
-        case .hotkeyDaemon(let model, let pythonBinary, let scriptPath):
-            runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
+        case .hotkeyDaemon(let model, let pythonBinary, let scriptPath, let shortcutIdentifier):
+            runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier)
         case .invalid:
             print(Arguments.usage)
         }
@@ -151,7 +151,7 @@ struct DictationPreviewCLI {
         }
     }
 
-    private static func runHotkeyDaemon(model: String, pythonBinary: String, scriptPath: String) {
+    private static func runHotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?) {
         let statusUI = ConsoleStatusUI()
         let logger = ConsoleLogger()
         logger.onLog = { message in
@@ -202,7 +202,11 @@ struct DictationPreviewCLI {
             emit("capture_error=\(error.localizedDescription)")
         }
 
-        let hotkeyController = HotkeyController()
+        let shortcutResolution = resolveHotkeyShortcuts(shortcutIdentifier: shortcutIdentifier)
+        if let warning = shortcutResolution.warning {
+            emit("warning=\(warning)")
+        }
+        let hotkeyController = HotkeyController(shortcuts: shortcutResolution.shortcuts)
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
             sessionEventHandler: orchestrator,
@@ -232,11 +236,13 @@ struct DictationPreviewCLI {
         if !hotkeyController.activeBackends.contains("carbon") {
             emit("warning=carbon_hotkey_unavailable_falling_back_to_event_tap")
         }
+        let shortcutHint = hotkeyController.shortcutSummary.replacingOccurrences(of: "|", with: "_or_")
+        emit("hint=focus_any_textbox_hold_\(shortcutHint)_speak_release_to_insert")
         #else
         emit("hotkey_daemon=running shortcuts=ctrl+shift+space|ctrl+shift+d")
         emit("hotkey_backend=none")
-        #endif
         emit("hint=focus_any_textbox_hold_ctrl_shift_space_or_ctrl_shift_d_speak_release_to_insert")
+        #endif
 #if canImport(Carbon)
         while true {
             _ = RunCurrentEventLoop(0.25)
@@ -245,6 +251,23 @@ struct DictationPreviewCLI {
         RunLoop.main.run()
 #endif
     }
+
+    private static func resolveHotkeyShortcuts(shortcutIdentifier: String?) -> (shortcuts: [HotkeyShortcut], warning: String?) {
+        let defaults: [HotkeyShortcut] = [.defaultPushToTalk, .defaultBackupPushToTalk]
+        guard let shortcutIdentifier else {
+            return (defaults, nil)
+        }
+
+        guard let parsed = HotkeyShortcut.parse(identifier: shortcutIdentifier) else {
+            return (defaults, "invalid shortcut identifier '\(shortcutIdentifier)'; using defaults")
+        }
+
+        var resolved = [parsed]
+        if parsed != .defaultBackupPushToTalk {
+            resolved.append(.defaultBackupPushToTalk)
+        }
+        return (resolved, nil)
+    }
 }
 
 private struct Arguments {
@@ -252,7 +275,7 @@ private struct Arguments {
         case simulate(String)
         case moonshineWAV(path: String, model: String, pythonBinary: String, scriptPath: String)
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
-        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String)
+        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?)
         case invalid
     }
 
@@ -261,7 +284,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --simulate "hello world"
       swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
     """
 
     let mode: Mode
@@ -319,7 +342,8 @@ private struct Arguments {
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
+            let shortcutIdentifier = value(after: "--shortcut", in: rawArgs)
+            return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier))
         }
 
         return Arguments(mode: .invalid)

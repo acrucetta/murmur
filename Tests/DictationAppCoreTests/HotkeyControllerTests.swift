@@ -28,4 +28,34 @@ struct HotkeyControllerTests {
         #expect(!shortcut.matchesCGEvent(keyCode: UInt16(kVK_ANSI_A), flags: [.maskControl, .maskShift]))
 #endif
     }
+
+    @Test
+    func parsesShortcutIdentifierForSpaceCombo() {
+#if canImport(Carbon)
+        let parsed = HotkeyShortcut.parse(identifier: "ctrl+shift+space")
+        #expect(parsed == .init(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | shiftKey)))
+#endif
+    }
+
+    @Test
+    func parsesShortcutIdentifierForLetterCombo() {
+#if canImport(Carbon)
+        let parsed = HotkeyShortcut.parse(identifier: "cmd+option+d")
+        #expect(parsed == .init(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | optionKey)))
+#endif
+    }
+
+    @Test
+    func rejectsShortcutIdentifierWithoutModifier() {
+#if canImport(Carbon)
+        #expect(HotkeyShortcut.parse(identifier: "space") == nil)
+#endif
+    }
+
+    @Test
+    func rejectsShortcutIdentifierWithUnknownKey() {
+#if canImport(Carbon)
+        #expect(HotkeyShortcut.parse(identifier: "ctrl+shift+f13") == nil)
+#endif
+    }
 }
