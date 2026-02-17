@@ -23,7 +23,7 @@ Usage:
   ${COMMAND_NAME} history [lines]
   ${COMMAND_NAME} history-path
   ${COMMAND_NAME} shortcut get
-  ${COMMAND_NAME} shortcut set <combo>
+  ${COMMAND_NAME} shortcut set [combo]
   ${COMMAND_NAME} shortcut reset
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} install
@@ -129,8 +129,38 @@ shortcut_set() {
   local shortcut="${1:-}"
   shortcut="$(trim "$shortcut")"
   if [[ -z "$shortcut" ]]; then
-    echo "shortcut value is required" >&2
-    return 2
+    if [[ ! -t 0 || ! -t 1 ]]; then
+      echo "shortcut value is required in non-interactive mode" >&2
+      return 2
+    fi
+
+    ensure_capture_build
+    local capture_output
+    if ! capture_output="$("$ROOT_DIR/.build/debug/DictationPreviewCLI" --capture-shortcut)"; then
+      echo "shortcut capture failed" >&2
+      return 1
+    fi
+
+    local captured
+    captured="$(printf '%s\n' "$capture_output" | sed -n 's/^shortcut=//p' | head -n 1)"
+    captured="$(trim "$captured")"
+    if [[ -z "$captured" ]]; then
+      echo "$capture_output" >&2
+      echo "shortcut capture did not return a valid combo" >&2
+      return 1
+    fi
+
+    shortcut="$captured"
+    echo "captured shortcut: $shortcut"
+    read -r -p "Use this shortcut? [y/N] " confirm
+    case "${confirm:-}" in
+      y|Y|yes|YES)
+        ;;
+      *)
+        echo "shortcut update cancelled"
+        return 1
+        ;;
+    esac
   fi
 
   mkdir -p "$CONFIG_DIR"
@@ -168,7 +198,7 @@ shortcut_command() {
       ;;
     *)
       echo "unknown shortcut action: $action" >&2
-      echo "usage: $COMMAND_NAME shortcut [get|set <combo>|reset]" >&2
+      echo "usage: $COMMAND_NAME shortcut [get|set [combo]|reset]" >&2
       return 2
       ;;
   esac
@@ -176,6 +206,10 @@ shortcut_command() {
 
 ensure_build() {
   (cd "$ROOT_DIR" && swift build --product MurmurMenuBarApp >/dev/null)
+}
+
+ensure_capture_build() {
+  (cd "$ROOT_DIR" && swift build --product DictationPreviewCLI >/dev/null)
 }
 
 is_running() {

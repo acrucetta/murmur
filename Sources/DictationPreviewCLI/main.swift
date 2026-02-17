@@ -3,6 +3,9 @@ import DictationAppCore
 #if canImport(Carbon)
 import Carbon
 #endif
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -22,6 +25,8 @@ struct DictationPreviewCLI {
             runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
         case .hotkeyDaemon(let model, let pythonBinary, let scriptPath, let shortcutIdentifier):
             runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier)
+        case .captureShortcut:
+            runCaptureShortcut()
         case .invalid:
             print(Arguments.usage)
         }
@@ -252,6 +257,25 @@ struct DictationPreviewCLI {
 #endif
     }
 
+    private static func runCaptureShortcut() {
+#if canImport(CoreGraphics) && canImport(Carbon)
+        fputs("Press the shortcut you want to use (must include ctrl/shift/option/cmd).\n", stderr)
+        fputs("Press Escape to cancel.\n", stderr)
+
+        switch ShortcutCapture.capture() {
+        case .captured(let shortcut):
+            emit("shortcut=\(shortcut.identifier)")
+        case .cancelled:
+            emit("error=shortcut_capture_cancelled")
+        case .failed(let reason):
+            emit("error=shortcut_capture_failed")
+            emit("details=\(reason)")
+        }
+#else
+        emit("error=shortcut_capture_unsupported")
+#endif
+    }
+
     private static func resolveHotkeyShortcuts(shortcutIdentifier: String?) -> (shortcuts: [HotkeyShortcut], warning: String?) {
         let defaults: [HotkeyShortcut] = [.defaultPushToTalk, .defaultBackupPushToTalk]
         guard let shortcutIdentifier else {
@@ -276,6 +300,7 @@ private struct Arguments {
         case moonshineWAV(path: String, model: String, pythonBinary: String, scriptPath: String)
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
         case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?)
+        case captureShortcut
         case invalid
     }
 
@@ -285,6 +310,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --capture-shortcut
     """
 
     let mode: Mode
@@ -346,6 +372,10 @@ private struct Arguments {
             return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier))
         }
 
+        if rawArgs.contains("--capture-shortcut") {
+            return Arguments(mode: .captureShortcut)
+        }
+
         return Arguments(mode: .invalid)
     }
 
@@ -363,6 +393,97 @@ private struct Arguments {
         return value.isEmpty ? nil : value
     }
 }
+
+#if canImport(CoreGraphics) && canImport(Carbon)
+private enum ShortcutCaptureResult {
+    case captured(HotkeyShortcut)
+    case cancelled
+    case failed(String)
+}
+
+nonisolated(unsafe) private var shortcutCaptureResult: ShortcutCaptureResult?
+
+private func shortcutCaptureCallback(
+    _ proxy: CGEventTapProxy,
+    _ type: CGEventType,
+    _ event: CGEvent,
+    _ userData: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard type == .keyDown else {
+        return Unmanaged.passUnretained(event)
+    }
+
+    let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+    let flags = event.flags.intersection([.maskControl, .maskShift, .maskAlternate, .maskCommand])
+    let modifiers = ShortcutCapture.carbonModifiers(from: flags)
+
+    if keyCode == UInt32(kVK_Escape), modifiers == 0 {
+        shortcutCaptureResult = .cancelled
+        CFRunLoopStop(CFRunLoopGetCurrent())
+        return Unmanaged.passUnretained(event)
+    }
+
+    guard modifiers != 0 else {
+        return Unmanaged.passUnretained(event)
+    }
+
+    shortcutCaptureResult = .captured(.init(keyCode: keyCode, modifiers: modifiers))
+    CFRunLoopStop(CFRunLoopGetCurrent())
+    return Unmanaged.passUnretained(event)
+}
+
+private enum ShortcutCapture {
+    private static let monitoredEventMask: CGEventMask = {
+        let keyDownMask = (CGEventMask(1) << CGEventMask(CGEventType.keyDown.rawValue))
+        return keyDownMask
+    }()
+
+    static func capture() -> ShortcutCaptureResult {
+        shortcutCaptureResult = nil
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: monitoredEventMask,
+            callback: shortcutCaptureCallback,
+            userInfo: nil
+        ) else {
+            return .failed("event tap unavailable (check Input Monitoring permission for terminal)")
+        }
+
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            return .failed("failed to create run loop source")
+        }
+
+        let runLoop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(runLoop, source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        CFRunLoopRun()
+        CGEvent.tapEnable(tap: tap, enable: false)
+        CFRunLoopRemoveSource(runLoop, source, .commonModes)
+
+        return shortcutCaptureResult ?? .failed("no shortcut captured")
+    }
+
+    static func carbonModifiers(from flags: CGEventFlags) -> UInt32 {
+        var modifiers: UInt32 = 0
+        if flags.contains(.maskControl) {
+            modifiers |= UInt32(controlKey)
+        }
+        if flags.contains(.maskShift) {
+            modifiers |= UInt32(shiftKey)
+        }
+        if flags.contains(.maskAlternate) {
+            modifiers |= UInt32(optionKey)
+        }
+        if flags.contains(.maskCommand) {
+            modifiers |= UInt32(cmdKey)
+        }
+        return modifiers
+    }
+}
+#endif
 
 private final class ConsoleFieldWriter: FocusedFieldWriting {
     private(set) var lastInsertedText: String?
