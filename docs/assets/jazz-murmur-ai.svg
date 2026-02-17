@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">Murmur Jazz Night</title>
+  <desc id="desc">Warm jazz-inspired illustration with microphone, moon bubble, and musical motion lines.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0f1020"/>
+      <stop offset="0.48" stop-color="#1e1730"/>
+      <stop offset="1" stop-color="#28121b"/>
+    </linearGradient>
+    <radialGradient id="spot" cx="0.25" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#ffce7a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffce7a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#9fe8ff"/>
+      <stop offset="1" stop-color="#4eb7db"/>
+    </radialGradient>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="mic" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f8ead2"/>
+      <stop offset="1" stop-color="#ceb890"/>
+    </linearGradient>
+    <linearGradient id="sax" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f4b650"/>
+      <stop offset="1" stop-color="#d98724"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1400" height="760" fill="url(#bg)"/>
+  <rect width="1400" height="760" fill="url(#spot)"/>
+
+  <g opacity="0.15">
+    <circle cx="180" cy="610" r="220" fill="#ff8d4d"/>
+    <circle cx="1230" cy="140" r="180" fill="#60d6ff"/>
+    <circle cx="1180" cy="640" r="240" fill="#8d62ff"/>
+  </g>
+
+  <g transform="translate(710 380)">
+    <circle r="162" fill="#1f2636" stroke="#57c6ea" stroke-width="4"/>
+    <circle r="136" fill="url(#moon)" opacity="0.94"/>
+    <path d="M-35 -45c40 24 54 67 44 104-11 43-45 78-92 85 36-9 58-39 63-74 6-39-10-82-44-115 9 0 20 0 29 0z" fill="#d4f7ff" opacity="0.88"/>
+    <g fill="#ffffff" opacity="0.9">
+      <circle cx="26" cy="-50" r="5"/>
+      <circle cx="45" cy="-16" r="3"/>
+      <circle cx="16" cy="16" r="4"/>
+    </g>
+  </g>
+
+  <g filter="url(#softGlow)">
+    <path d="M220 524c122-146 230-194 350-182 154 16 254 110 420 92" fill="none" stroke="#ffd27d" stroke-width="7" stroke-linecap="round" opacity="0.72"/>
+    <path d="M248 568c112-122 214-162 324-152 140 12 232 92 380 74" fill="none" stroke="#66d8ff" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+    <path d="M280 610c102-106 192-136 292-126 124 10 206 78 336 62" fill="none" stroke="#9f82ff" stroke-width="4" stroke-linecap="round" opacity="0.62"/>
+  </g>
+
+  <g transform="translate(296 510)">
+    <rect x="-26" y="-120" width="52" height="142" rx="26" fill="url(#mic)"/>
+    <rect x="-40" y="26" width="80" height="16" rx="8" fill="#d5b889"/>
+    <rect x="-12" y="22" width="24" height="98" rx="12" fill="#d8c09a"/>
+    <rect x="-62" y="114" width="124" height="20" rx="10" fill="#c8a16b"/>
+    <g stroke="#9f845f" stroke-width="4" opacity="0.8">
+      <line x1="-10" y1="-86" x2="10" y2="-86"/>
+      <line x1="-10" y1="-62" x2="10" y2="-62"/>
+      <line x1="-10" y1="-38" x2="10" y2="-38"/>
+      <line x1="-10" y1="-14" x2="10" y2="-14"/>
+    </g>
+  </g>
+
+  <g transform="translate(1090 520) rotate(8)">
+    <path d="M-108 20c52-82 102-96 142-82 38 14 56 56 40 106l-18 58c-7 22-26 38-48 42l-24 4 8-26 14-44c8-24-1-48-20-58-20-10-44-2-58 20l-20 32-16-52z" fill="url(#sax)"/>
+    <circle cx="-2" cy="126" r="10" fill="#ffd382"/>
+    <circle cx="22" cy="116" r="9" fill="#ffd382"/>
+    <circle cx="44" cy="102" r="8" fill="#ffd382"/>
+  </g>
+
+  <g fill="#fdf3df" opacity="0.93">
+    <text x="118" y="148" font-size="72" font-family="Georgia, 'Times New Roman', serif">Murmur</text>
+    <text x="118" y="194" font-size="26" font-family="Georgia, 'Times New Roman', serif" opacity="0.9">Late-night dictation, soft-jazz energy.</text>
+  </g>
+
+  <g fill="#ffe2a1" opacity="0.85">
+    <path d="M1020 166h22v72h-22z"/>
+    <circle cx="1010" cy="250" r="18"/>
+    <path d="M1098 182h20v60h-20z"/>
+    <circle cx="1088" cy="252" r="16"/>
+    <path d="M1162 206h18v48h-18z"/>
+    <circle cx="1154" cy="260" r="14"/>
+  </g>
+</svg>

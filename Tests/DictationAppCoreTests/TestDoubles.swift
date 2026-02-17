@@ -22,3 +22,16 @@ final class StatusUISpy: StatusPresenting {
         partialTranscripts.append(text)
     }
 }
+
+final class FeedbackSpy: FeedbackPresenting {
+    private(set) var recordingStartCount = 0
+    private(set) var recordingStopCount = 0
+
+    func recordingDidStart() {
+        recordingStartCount += 1
+    }
+
+    func recordingDidStop() {
+        recordingStopCount += 1
+    }
+}

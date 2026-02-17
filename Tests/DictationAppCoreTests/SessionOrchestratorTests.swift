@@ -43,6 +43,7 @@ struct SessionOrchestratorTests {
         let writer = FakeFieldWriter()
         let history = TranscriptHistorySpy()
         let logger = LoggerSpy()
+        let feedback = FeedbackSpy()
 
         let orchestrator = SessionOrchestrator(
             permissionManager: permissions,
@@ -51,6 +52,7 @@ struct SessionOrchestratorTests {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: StatusUISpy(),
+            feedback: feedback,
             transcriptHistory: history,
             logger: logger,
             now: ClockSequence([
@@ -76,6 +78,8 @@ struct SessionOrchestratorTests {
         #expect(history.entries.first?.insertResult.success == true)
         #expect(logger.messages.contains("release_to_final_ms=300"))
         #expect(logger.messages.contains("release_to_insert_ms=600"))
+        #expect(feedback.recordingStartCount == 1)
+        #expect(feedback.recordingStopCount == 1)
         #expect(orchestrator.state == .idle)
     }
 
@@ -221,6 +225,57 @@ struct SessionOrchestratorTests {
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
         orchestrator.handle(.audioFrame(frame))
         #expect(asr.consumeCallCount == 1)
+    }
+
+    @Test
+    func recordingFeedbackFiresOnPressAndRelease() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "hello", confidence: 0.9)
+        let feedback = FeedbackSpy()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            feedback: feedback,
+            logger: NoopLogger()
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(feedback.recordingStartCount == 1)
+        #expect(feedback.recordingStopCount == 1)
+    }
+
+    @Test
+    func recordingFeedbackDoesNotFireWhenPermissionsDenied() {
+        let feedback = FeedbackSpy()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(
+                snapshot: .init(
+                    microphone: .denied,
+                    accessibility: .authorized,
+                    inputMonitoring: .authorized
+                )
+            ),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: FakeASREngine(),
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            feedback: feedback,
+            logger: NoopLogger()
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+
+        #expect(feedback.recordingStartCount == 0)
+        #expect(feedback.recordingStopCount == 0)
     }
 }
 
