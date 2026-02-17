@@ -4,15 +4,17 @@ Use this to enable local WAV transcription in the preview CLI.
 
 ## 1) Install local Python dependency
 ```bash
-pip install moonshine-voice useful-moonshine-onnx
-python -m moonshine_voice.download --language en
+./murmur install
 ```
-If Homebrew Python blocks global installs (`externally-managed-environment`), use a venv:
+
+This command creates/reuses `.venv`, installs Moonshine packages, downloads the English model, builds Murmur, and installs global `murmur`.
+
+Optional variants:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install moonshine-voice useful-moonshine-onnx
-python -m moonshine_voice.download --language en
+./murmur setup                              # local-only, no global command
+./murmur install --python /opt/homebrew/bin/python3
+./murmur install --skip-model-download
+./murmur install --link-only               # only install global symlink
 ```
 
 ## 2) Run Moonshine preview against a WAV file
@@ -128,7 +130,7 @@ Transcript history files are stored at:
 
 Optional global install for `murmur` command anywhere:
 ```bash
-./murmur install
+./murmur install --link-only
 murmur doctor
 ```
 
