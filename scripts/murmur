@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BIN="$ROOT_DIR/.build/debug/MurmurMenuBarApp"
 PID_FILE="/tmp/murmur-menubar.pid"
 LOG_FILE="/tmp/murmur-menubar.log"
+TRANSCRIPT_DIR="${MURMUR_TRANSCRIPTS_DIR:-$HOME/Library/Application Support/Murmur/transcriptions}"
 COMMAND_NAME="${0##*/}"
 
 usage() {
@@ -16,6 +17,8 @@ Usage:
   ${COMMAND_NAME} restart [--model <id>]
   ${COMMAND_NAME} status
   ${COMMAND_NAME} logs
+  ${COMMAND_NAME} history [lines]
+  ${COMMAND_NAME} history-path
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} install
   ${COMMAND_NAME} uninstall
@@ -23,6 +26,7 @@ Usage:
 Environment overrides:
   MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
   MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
+  MURMUR_TRANSCRIPTS_DIR   Transcription history folder (default: ~/Library/Application Support/Murmur/transcriptions)
   MURMUR_BIN_DIR           Install directory for global CLI (default: ~/.local/bin)
 USAGE
 }
@@ -157,11 +161,41 @@ status_bg() {
   fi
 }
 
+history_path() {
+  echo "$TRANSCRIPT_DIR"
+}
+
+history_show() {
+  local line_count="${1:-50}"
+  if [[ ! "$line_count" =~ ^[0-9]+$ ]]; then
+    echo "history lines must be a number" >&2
+    return 2
+  fi
+
+  if [[ ! -d "$TRANSCRIPT_DIR" ]]; then
+    echo "no transcript history yet"
+    return 0
+  fi
+
+  local files=()
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(find "$TRANSCRIPT_DIR" -type f -name '*.txt' | sort)
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo "no transcript history yet"
+    return 0
+  fi
+
+  cat "${files[@]}" | tail -n "$line_count"
+}
+
 doctor() {
   echo "repo=$ROOT_DIR"
   echo "binary=$APP_BIN"
   echo "python=$(resolve_python)"
   echo "moonshine_script=$(resolve_script)"
+  echo "history_dir=$TRANSCRIPT_DIR"
   if is_running; then
     echo "status=running pid=$(cat "$PID_FILE")"
   else
@@ -213,6 +247,12 @@ status)
 logs)
   touch "$LOG_FILE"
   tail -f "$LOG_FILE"
+  ;;
+history)
+  history_show "$@"
+  ;;
+history-path)
+  history_path
   ;;
 doctor)
   doctor

@@ -111,11 +111,20 @@ The same hotkeys are active:
 
 Launcher shortcuts:
 ```bash
+./murmur run      # foreground
 ./murmur start
 ./murmur status
 ./murmur logs
 ./murmur stop
+./murmur history
+./murmur history-path
 ```
+
+`run` stays attached to your terminal.
+`start` runs in the background and writes logs to `/tmp/murmur-menubar.log`.
+
+Transcript history files are stored at:
+- `~/Library/Application Support/Murmur/transcriptions/`
 
 Optional global install for `murmur` command anywhere:
 ```bash

@@ -41,6 +41,7 @@ struct SessionOrchestratorTests {
         let audio = FakeAudioCapture()
         let asr = FakeASREngine()
         let writer = FakeFieldWriter()
+        let history = TranscriptHistorySpy()
         let logger = LoggerSpy()
 
         let orchestrator = SessionOrchestrator(
@@ -50,6 +51,7 @@ struct SessionOrchestratorTests {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: StatusUISpy(),
+            transcriptHistory: history,
             logger: logger,
             now: ClockSequence([
                 Date(timeIntervalSince1970: 1.5),
@@ -68,6 +70,10 @@ struct SessionOrchestratorTests {
         #expect(asr.consumeCallCount == 0)
         #expect(writer.insertCallCount == 1)
         #expect(writer.lastInsertedText == "Hello world.")
+        #expect(history.entries.count == 1)
+        #expect(history.entries.first?.transcript == "Hello world.")
+        #expect(history.entries.first?.insertResult.method == .accessibilityDirect)
+        #expect(history.entries.first?.insertResult.success == true)
         #expect(logger.messages.contains("release_to_final_ms=300"))
         #expect(logger.messages.contains("release_to_insert_ms=600"))
         #expect(orchestrator.state == .idle)
@@ -290,6 +296,14 @@ private final class LoggerSpy: Logging {
 
     func log(_ message: String) {
         messages.append(message)
+    }
+}
+
+private final class TranscriptHistorySpy: TranscriptHistoryWriting {
+    private(set) var entries: [TranscriptHistoryEntry] = []
+
+    func record(_ entry: TranscriptHistoryEntry) {
+        entries.append(entry)
     }
 }
 

@@ -90,6 +90,7 @@ private final class MenuBarRuntime {
         let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
         let logger = MenuBarLogger()
         let audioCapture = AudioCapture()
+        let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
             model: model
@@ -101,6 +102,7 @@ private final class MenuBarRuntime {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: FocusedFieldWriter(),
             statusUI: statusUI,
+            transcriptHistory: transcriptHistory,
             logger: logger
         )
         let hotkeyController = HotkeyController()

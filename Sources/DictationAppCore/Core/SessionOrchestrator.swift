@@ -10,6 +10,7 @@ public final class SessionOrchestrator {
     private let postProcessor: TextPostProcessing
     private let fieldWriter: FocusedFieldWriting
     private let statusUI: StatusPresenting
+    private let transcriptHistory: TranscriptHistoryWriting
     private let logger: Logging
     private let now: NowProvider
     private var releaseTimestamp: Date?
@@ -27,6 +28,7 @@ public final class SessionOrchestrator {
         postProcessor: TextPostProcessing,
         fieldWriter: FocusedFieldWriting,
         statusUI: StatusPresenting,
+        transcriptHistory: TranscriptHistoryWriting = NoopTranscriptHistoryWriter(),
         logger: Logging,
         now: @escaping NowProvider = Date.init,
         stateMachine: StateMachine = .init()
@@ -37,6 +39,7 @@ public final class SessionOrchestrator {
         self.postProcessor = postProcessor
         self.fieldWriter = fieldWriter
         self.statusUI = statusUI
+        self.transcriptHistory = transcriptHistory
         self.logger = logger
         self.now = now
         self.stateMachine = stateMachine
@@ -76,6 +79,13 @@ public final class SessionOrchestrator {
                 logReleaseToFinalLatencyIfPossible()
                 let cleaned = postProcessor.clean(finalTranscript.text)
                 let insertResult = fieldWriter.insert(cleaned)
+                transcriptHistory.record(
+                    .init(
+                        timestamp: releaseTimestamp ?? now(),
+                        transcript: cleaned,
+                        insertResult: insertResult
+                    )
+                )
                 handle(.insertResult(insertResult))
             }
         case .insertResult:

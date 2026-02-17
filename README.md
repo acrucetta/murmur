@@ -47,13 +47,25 @@ What you get:
 - Default model: `medium-streaming-en` via `moonshine_voice`.
 - Fallback backend: `moonshine_onnx` if `moonshine_voice` is unavailable.
 
-### 4) Background control commands (start/stop/logs)
+### 4) Foreground vs background
 
 ```bash
+./murmur run      # foreground (attached to current terminal)
 ./murmur start
 ./murmur status
 ./murmur logs
 ./murmur stop
+```
+
+`run` keeps the process attached to your current shell.
+`start` daemonizes it in the background and writes logs to `/tmp/murmur-menubar.log`.
+
+### 5) Transcript history (local)
+
+```bash
+./murmur history-path
+./murmur history
+./murmur history 200
 ```
 
 Optional global install (so you can run `murmur` from anywhere):
@@ -141,6 +153,9 @@ Menu bar startup diagnostics:
 Launcher logs:
 - `/tmp/murmur-menubar.log`
 - `/tmp/murmur-menubar.pid`
+
+Transcript history:
+- `~/Library/Application Support/Murmur/transcriptions/`
 
 ## Permissions Checklist (macOS)
 

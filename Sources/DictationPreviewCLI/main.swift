@@ -92,6 +92,7 @@ struct DictationPreviewCLI {
         let logger = ConsoleLogger()
         let meter = LiveCaptureMeter()
         let audioCapture = AudioCapture()
+        let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
             model: model
@@ -104,6 +105,7 @@ struct DictationPreviewCLI {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: statusUI,
+            transcriptHistory: transcriptHistory,
             logger: logger
         )
 
@@ -165,6 +167,7 @@ struct DictationPreviewCLI {
         }
 
         let audioCapture = AudioCapture()
+        let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
             model: model
@@ -176,6 +179,7 @@ struct DictationPreviewCLI {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: statusUI,
+            transcriptHistory: transcriptHistory,
             logger: logger
         )
         statusUI.onError = { errorCode in
