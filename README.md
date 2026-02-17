@@ -4,6 +4,8 @@ Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moon
 
 Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. No cloud calls in the runtime path.
 
+![Jazz Murmur AI art](docs/assets/jazz-murmur-ai.svg)
+
 ```text
    ( speak )   ──▶   🫧 Murmur   ──▶   ( text appears )
 ```
@@ -14,6 +16,7 @@ Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the f
 - Local ASR via Moonshine (`moonshine_voice` primary, `moonshine_onnx` fallback).
 - Cross-app insertion (Accessibility direct write + clipboard fallback).
 - Disfluency-aware cleanup (basic stutter/repair handling).
+- Recording start/stop feedback cues (sound + haptic in menu bar app runtime).
 - Menu bar runtime + simple CLI launcher.
 - Local transcript history on disk.
 

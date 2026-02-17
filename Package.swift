@@ -24,7 +24,10 @@ let package = Package(
     targets: [
         .target(
             name: "DictationAppCore",
-            path: "Sources/DictationAppCore"
+            path: "Sources/DictationAppCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .executableTarget(
             name: "DictationPreviewCLI",

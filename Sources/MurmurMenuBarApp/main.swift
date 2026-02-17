@@ -123,6 +123,7 @@ private final class MenuBarRuntime {
             command: [pythonBinary, scriptPath],
             model: model
         )
+        let feedback = AppFeedbackPresenter()
         let orchestrator = SessionOrchestrator(
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
@@ -130,6 +131,7 @@ private final class MenuBarRuntime {
             postProcessor: TextPostProcessorV2(),
             fieldWriter: FocusedFieldWriter(),
             statusUI: statusUI,
+            feedback: feedback,
             transcriptHistory: transcriptHistory,
             logger: logger
         )
@@ -252,6 +254,74 @@ private final class MenuBarStatusUI: StatusPresenting {
 private final class MenuBarLogger: Logging {
     func log(_ message: String) {
         Swift.print("metric \(message)")
+    }
+}
+
+private enum FeedbackSoundID: CaseIterable {
+    case recordingStart
+    case recordingStop
+
+    var volume: Float {
+        switch self {
+        case .recordingStart:
+            return 0.62
+        case .recordingStop:
+            return 0.55
+        }
+    }
+
+    var asset: FeedbackSoundAsset {
+        switch self {
+        case .recordingStart:
+            return .recordingStart
+        case .recordingStop:
+            return .recordingStop
+        }
+    }
+}
+
+private enum FeedbackSoundLibrary {
+    static func resourceURL(for id: FeedbackSoundID) -> URL? {
+        id.asset.resourceURL
+    }
+
+    @MainActor
+    static func loadSound(for id: FeedbackSoundID) -> NSSound? {
+        guard let url = resourceURL(for: id) else {
+            return nil
+        }
+
+        guard let sound = NSSound(contentsOf: url, byReference: true) else {
+            return nil
+        }
+        sound.volume = id.volume
+        return sound
+    }
+}
+
+private final class AppFeedbackPresenter: FeedbackPresenting {
+    func recordingDidStart() {
+        Task { @MainActor in
+            Self.playBestEffortCue(soundID: .recordingStart)
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+        }
+    }
+
+    func recordingDidStop() {
+        Task { @MainActor in
+            Self.playBestEffortCue(soundID: .recordingStop)
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .default)
+        }
+    }
+
+    @MainActor
+    private static func playBestEffortCue(soundID: FeedbackSoundID) {
+        if let sound = FeedbackSoundLibrary.loadSound(for: soundID) {
+            sound.stop()
+            sound.play()
+            return
+        }
+        NSSound.beep()
     }
 }
 
