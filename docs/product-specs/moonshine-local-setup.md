@@ -75,3 +75,16 @@ Expected hotkey activity:
 If startup fails, check for:
 - `error=hotkey_start_failed ... eventHotKeyExistsErr` (another process already owns this shortcut).
 - `error=hotkey_start_failed ... eventInternalErr` (environment issue; test in a normal interactive terminal session).
+
+## 5) Run as menu bar app (logo + live state)
+```bash
+swift run MurmurMenuBarApp --moonshine-python "$(pwd)/.venv/bin/python3"
+```
+What you should see:
+- A Murmur icon in the macOS menu bar.
+- Menu lines for current state, active hotkey backend, last error, and partial transcript.
+- `Quit Murmur` action from the menu.
+
+The same hotkeys are active:
+- `Ctrl + Shift + Space`
+- `Ctrl + Shift + D`

@@ -16,6 +16,10 @@ let package = Package(
             name: "DictationPreviewCLI",
             targets: ["DictationPreviewCLI"]
         ),
+        .executable(
+            name: "MurmurMenuBarApp",
+            targets: ["MurmurMenuBarApp"]
+        ),
     ],
     targets: [
         .target(
@@ -26,6 +30,11 @@ let package = Package(
             name: "DictationPreviewCLI",
             dependencies: ["DictationAppCore"],
             path: "Sources/DictationPreviewCLI"
+        ),
+        .executableTarget(
+            name: "MurmurMenuBarApp",
+            dependencies: ["DictationAppCore"],
+            path: "Sources/MurmurMenuBarApp"
         ),
         .testTarget(
             name: "DictationAppCoreTests",
