@@ -37,7 +37,7 @@ swift test
 ### 3) Run menu bar app (recommended MVP flow)
 
 ```bash
-swift run MurmurMenuBarApp --moonshine-python "$(pwd)/.venv/bin/python3"
+./murmur run
 ```
 
 What you get:
@@ -47,24 +47,46 @@ What you get:
 - Default model: `medium-streaming-en` via `moonshine_voice`.
 - Fallback backend: `moonshine_onnx` if `moonshine_voice` is unavailable.
 
+### 4) Background control commands (start/stop/logs)
+
+```bash
+./murmur start
+./murmur status
+./murmur logs
+./murmur stop
+```
+
+Optional global install (so you can run `murmur` from anywhere):
+
+```bash
+./murmur install
+murmur status
+```
+
 ## Run Modes
 
 ### Menu bar app
 
 ```bash
-swift run MurmurMenuBarApp --moonshine-python "$(pwd)/.venv/bin/python3"
+./murmur run
+```
+
+Equivalent direct command (now auto-resolves `.venv` Python if present):
+
+```bash
+swift run MurmurMenuBarApp
 ```
 
 ### Hotkey daemon CLI
 
 ```bash
-swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3"
+swift run DictationPreviewCLI --hotkey-daemon
 ```
 
 ### Live mic preview (press Enter to start/stop)
 
 ```bash
-swift run DictationPreviewCLI --moonshine-live --moonshine-python "$(pwd)/.venv/bin/python3"
+swift run DictationPreviewCLI --moonshine-live
 ```
 
 Behavior:
@@ -75,7 +97,7 @@ Behavior:
 ### WAV transcription preview
 
 ```bash
-swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav --moonshine-python "$(pwd)/.venv/bin/python3"
+swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav
 ```
 
 ### Simulation path (no mic/model)
@@ -115,6 +137,10 @@ Common metrics/events:
 Menu bar startup diagnostics:
 - `metric menu_button_configured ...`
 - `metric menu_bar_diagnostics status_item=true ...`
+
+Launcher logs:
+- `/tmp/murmur-menubar.log`
+- `/tmp/murmur-menubar.pid`
 
 ## Permissions Checklist (macOS)
 

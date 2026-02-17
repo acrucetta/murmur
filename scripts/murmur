@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_BIN="$ROOT_DIR/.build/debug/MurmurMenuBarApp"
+PID_FILE="/tmp/murmur-menubar.pid"
+LOG_FILE="/tmp/murmur-menubar.log"
+COMMAND_NAME="${0##*/}"
+
+usage() {
+  cat <<USAGE
+Usage:
+  ${COMMAND_NAME} run [--model <id>]
+  ${COMMAND_NAME} start [--model <id>]
+  ${COMMAND_NAME} stop
+  ${COMMAND_NAME} restart [--model <id>]
+  ${COMMAND_NAME} status
+  ${COMMAND_NAME} logs
+  ${COMMAND_NAME} doctor
+  ${COMMAND_NAME} install
+  ${COMMAND_NAME} uninstall
+
+Environment overrides:
+  MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
+  MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
+  MURMUR_BIN_DIR           Install directory for global CLI (default: ~/.local/bin)
+USAGE
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+resolve_python() {
+  local env_python="${MURMUR_MOONSHINE_PYTHON:-}"
+  env_python="$(trim "$env_python")"
+  if [[ -n "$env_python" ]]; then
+    printf '%s\n' "$env_python"
+    return
+  fi
+
+  local venv_env="${VIRTUAL_ENV:-}"
+  venv_env="$(trim "$venv_env")"
+  if [[ -n "$venv_env" && -x "$venv_env/bin/python3" ]]; then
+    printf '%s\n' "$venv_env/bin/python3"
+    return
+  fi
+
+  if [[ -x "$ROOT_DIR/.venv/bin/python3" ]]; then
+    printf '%s\n' "$ROOT_DIR/.venv/bin/python3"
+    return
+  fi
+
+  printf '%s\n' "python3"
+}
+
+resolve_script() {
+  local env_script="${MURMUR_MOONSHINE_SCRIPT:-}"
+  env_script="$(trim "$env_script")"
+  if [[ -n "$env_script" ]]; then
+    printf '%s\n' "$env_script"
+    return
+  fi
+
+  if [[ -f "$ROOT_DIR/scripts/moonshine_transcribe.py" ]]; then
+    printf '%s\n' "$ROOT_DIR/scripts/moonshine_transcribe.py"
+    return
+  fi
+
+  printf '%s\n' "scripts/moonshine_transcribe.py"
+}
+
+ensure_build() {
+  (cd "$ROOT_DIR" && swift build --product MurmurMenuBarApp >/dev/null)
+}
+
+is_running() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE")"
+  if [[ -z "$pid" ]]; then
+    return 1
+  fi
+
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  rm -f "$PID_FILE"
+  return 1
+}
+
+start_bg() {
+  if is_running; then
+    echo "murmur already running (pid $(cat "$PID_FILE"))"
+    return 0
+  fi
+
+  local python_bin script_path
+  python_bin="$(resolve_python)"
+  script_path="$(resolve_script)"
+
+  ensure_build
+  (
+    cd "$ROOT_DIR"
+    nohup "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" "$@" >"$LOG_FILE" 2>&1 &
+    echo $! >"$PID_FILE"
+  )
+
+  sleep 0.2
+  if is_running; then
+    echo "murmur started (pid $(cat "$PID_FILE"))"
+    echo "log: $LOG_FILE"
+  else
+    echo "failed to start murmur; see $LOG_FILE" >&2
+    return 1
+  fi
+}
+
+run_fg() {
+  local python_bin script_path
+  python_bin="$(resolve_python)"
+  script_path="$(resolve_script)"
+
+  ensure_build
+  cd "$ROOT_DIR"
+  exec "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" "$@"
+}
+
+stop_bg() {
+  if ! is_running; then
+    echo "murmur is not running"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE")"
+  kill "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  echo "murmur stopped"
+}
+
+status_bg() {
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    echo "murmur running (pid $pid)"
+    echo "log: $LOG_FILE"
+  else
+    echo "murmur not running"
+  fi
+}
+
+doctor() {
+  echo "repo=$ROOT_DIR"
+  echo "binary=$APP_BIN"
+  echo "python=$(resolve_python)"
+  echo "moonshine_script=$(resolve_script)"
+  if is_running; then
+    echo "status=running pid=$(cat "$PID_FILE")"
+  else
+    echo "status=stopped"
+  fi
+}
+
+install_cli() {
+  local install_dir="${MURMUR_BIN_DIR:-$HOME/.local/bin}"
+  mkdir -p "$install_dir"
+  ln -sfn "$ROOT_DIR/murmur" "$install_dir/murmur"
+  echo "installed murmur -> $install_dir/murmur"
+  case ":$PATH:" in
+    *":$install_dir:"*) ;;
+    *)
+      echo "note: add $install_dir to PATH to run 'murmur' from anywhere"
+      ;;
+  esac
+}
+
+uninstall_cli() {
+  local install_dir="${MURMUR_BIN_DIR:-$HOME/.local/bin}"
+  rm -f "$install_dir/murmur"
+  echo "removed $install_dir/murmur"
+}
+
+cmd="${1:-run}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+case "$cmd" in
+run)
+  run_fg "$@"
+  ;;
+start)
+  start_bg "$@"
+  ;;
+stop)
+  stop_bg
+  ;;
+restart)
+  stop_bg
+  start_bg "$@"
+  ;;
+status)
+  status_bg
+  ;;
+logs)
+  touch "$LOG_FILE"
+  tail -f "$LOG_FILE"
+  ;;
+doctor)
+  doctor
+  ;;
+install)
+  install_cli
+  ;;
+uninstall)
+  uninstall_cli
+  ;;
+help|-h|--help)
+  usage
+  ;;
+*)
+  usage >&2
+  exit 2
+  ;;
+esac

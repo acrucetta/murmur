@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve symlinked entrypoints (e.g., ~/.local/bin/murmur -> repo/murmur)
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+
+ROOT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+exec "$ROOT_DIR/scripts/murmur" "$@"

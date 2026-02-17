@@ -263,6 +263,9 @@ private struct Arguments {
     let mode: Mode
 
     static func parse(_ rawArgs: [String]) -> Arguments {
+        let currentDirectory = FileManager.default.currentDirectoryPath
+        let environment = ProcessInfo.processInfo.environment
+
         if let transcript = value(after: "--simulate", in: rawArgs) {
             let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
@@ -272,22 +275,46 @@ private struct Arguments {
 
         if let wavPath = value(after: "--moonshine-wav", in: rawArgs) {
             let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
-            let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
-            let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
+            let pythonBinary = RuntimePathResolver.resolvePythonBinary(
+                explicit: value(after: "--moonshine-python", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
+            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
+                explicit: value(after: "--moonshine-script", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
             return Arguments(mode: .moonshineWAV(path: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 
         if rawArgs.contains("--moonshine-live") {
             let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
-            let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
-            let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
+            let pythonBinary = RuntimePathResolver.resolvePythonBinary(
+                explicit: value(after: "--moonshine-python", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
+            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
+                explicit: value(after: "--moonshine-script", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
             return Arguments(mode: .moonshineLive(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 
         if rawArgs.contains("--hotkey-daemon") {
             let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
-            let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
-            let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
+            let pythonBinary = RuntimePathResolver.resolvePythonBinary(
+                explicit: value(after: "--moonshine-python", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
+            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
+                explicit: value(after: "--moonshine-script", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
             return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 

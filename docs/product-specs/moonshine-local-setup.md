@@ -22,7 +22,7 @@ swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav
 
 ## 3) Run Moonshine preview from live microphone capture
 ```bash
-swift run DictationPreviewCLI --moonshine-live --moonshine-python "$(pwd)/.venv/bin/python3"
+swift run DictationPreviewCLI --moonshine-live
 ```
 Flow:
 - Focus a target text box before starting (Notes, Slack, browser textarea, VS Code editor).
@@ -33,7 +33,7 @@ Flow:
 
 ## 4) Run as global hotkey daemon (background-friendly)
 ```bash
-swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3"
+swift run DictationPreviewCLI --hotkey-daemon
 ```
 
 Default hotkeys:
@@ -42,18 +42,27 @@ Default hotkeys:
 
 Background example:
 ```bash
-nohup swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3" > /tmp/murmur-daemon.log 2>&1 &
+nohup swift run DictationPreviewCLI --hotkey-daemon > /tmp/murmur-daemon.log 2>&1 &
 ```
 Lower-latency restart example (skips `swift run` build step):
 ```bash
 swift build
-nohup ./.build/debug/DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/bin/python3" > /tmp/murmur-daemon.log 2>&1 &
+nohup ./.build/debug/DictationPreviewCLI --hotkey-daemon > /tmp/murmur-daemon.log 2>&1 &
 ```
 
 Optional flags:
 - `--moonshine-python /path/to/python3`
 - `--moonshine-script /path/to/scripts/moonshine_transcribe.py`
 - `--model medium-streaming-en` (default)
+- `MURMUR_MOONSHINE_PYTHON=/path/to/python3` (env override for all run modes)
+- `MURMUR_MOONSHINE_SCRIPT=/path/to/script.py` (env override for all run modes)
+
+Default resolver order for python:
+1. `--moonshine-python`
+2. `MURMUR_MOONSHINE_PYTHON`
+3. `$VIRTUAL_ENV/bin/python3`
+4. `./.venv/bin/python3`
+5. `python3`
 
 Advanced script flags (passed via `--moonshine-script` custom wrapper):
 - `--backend auto|voice|onnx` (default `auto`)
@@ -89,7 +98,7 @@ If startup fails, check for:
 
 ## 5) Run as menu bar app (logo + live state)
 ```bash
-swift run MurmurMenuBarApp --moonshine-python "$(pwd)/.venv/bin/python3"
+./murmur run
 ```
 What you should see:
 - A Murmur icon in the macOS menu bar.
@@ -99,3 +108,17 @@ What you should see:
 The same hotkeys are active:
 - `Ctrl + Shift + Space`
 - `Ctrl + Shift + D`
+
+Launcher shortcuts:
+```bash
+./murmur start
+./murmur status
+./murmur logs
+./murmur stop
+```
+
+Optional global install for `murmur` command anywhere:
+```bash
+./murmur install
+murmur doctor
+```

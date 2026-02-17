@@ -39,10 +39,21 @@ private struct Arguments {
     let scriptPath: String
 
     static func parse(_ rawArgs: [String]) -> Arguments {
-        Arguments(
+        let currentDirectory = FileManager.default.currentDirectoryPath
+        let environment = ProcessInfo.processInfo.environment
+
+        return Arguments(
             model: value(after: "--model", in: rawArgs) ?? "medium-streaming-en",
-            pythonBinary: value(after: "--moonshine-python", in: rawArgs) ?? "python3",
-            scriptPath: value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
+            pythonBinary: RuntimePathResolver.resolvePythonBinary(
+                explicit: value(after: "--moonshine-python", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            ),
+            scriptPath: RuntimePathResolver.resolveMoonshineScriptPath(
+                explicit: value(after: "--moonshine-script", in: rawArgs),
+                currentDirectory: currentDirectory,
+                environment: environment
+            )
         )
     }
 
