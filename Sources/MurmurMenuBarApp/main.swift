@@ -638,7 +638,7 @@ private final class RecordingOverlayController {
         let visibleFrame = screen.visibleFrame
         let size = panel.frame.size
         let x = visibleFrame.midX - (size.width / 2)
-        let y = visibleFrame.minY + 58
+        let y = visibleFrame.minY + 20
         let safeX = max(visibleFrame.minX + 20, min(x, visibleFrame.maxX - size.width - 20))
         panel.setFrameOrigin(NSPoint(x: safeX, y: y))
     }
@@ -899,9 +899,9 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 72,
-                activityHeight: 10,
-                meterWidth: 42,
+                activityWidth: 58,
+                activityHeight: 8,
+                meterWidth: 34,
                 meterHeight: 8,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
@@ -962,9 +962,9 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 72,
-                activityHeight: 10,
-                meterWidth: 42,
+                activityWidth: 58,
+                activityHeight: 8,
+                meterWidth: 34,
                 meterHeight: 8,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
@@ -983,9 +983,9 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 72,
-                activityHeight: 10,
-                meterWidth: 42,
+                activityWidth: 58,
+                activityHeight: 8,
+                meterWidth: 34,
                 meterHeight: 8,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
