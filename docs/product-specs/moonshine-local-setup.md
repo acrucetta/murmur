@@ -105,6 +105,7 @@ If startup fails, check for:
 What you should see:
 - A Murmur icon in the macOS menu bar.
 - Menu lines for current state, active hotkey backend, last error, and partial transcript.
+- A gentle start cue (sound + haptic) when recording begins, and a gentle stop cue when recording ends.
 - `Quit Murmur` action from the menu.
 
 The same hotkeys are active:
@@ -124,6 +125,7 @@ Launcher shortcuts:
 
 `run` stays attached to your terminal.
 `start` runs in the background and writes logs to `/tmp/murmur-menubar.log`.
+Recording cues are emitted by the menu bar app runtime (AppKit), not by terminal bell output.
 
 Transcript history files are stored at:
 - `~/Library/Application Support/Murmur/transcriptions/`
@@ -141,3 +143,8 @@ murmur shortcut set
 murmur shortcut set "ctrl+option+space"
 murmur shortcut reset
 ```
+
+## Recording feedback troubleshooting
+- If cues are missing, verify Murmur is running as the menu bar app (`murmur run` or `murmur start`).
+- Check system output volume and ensure your current audio output device is active.
+- For haptics, enable trackpad haptics in macOS settings (if your device supports force feedback).

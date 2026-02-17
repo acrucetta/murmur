@@ -2,6 +2,9 @@
 
 Primary entrypoint for repository knowledge.
 
+## 0) User-Facing Entry
+- `README.md` (install, run, shortcut config, troubleshooting, current UX)
+
 ## 1) Product Truth
 - `docs/product-specs/index.md`
 - `docs/product-specs/macos-local-dictation-mvp.md`
