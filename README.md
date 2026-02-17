@@ -2,9 +2,9 @@
 
 Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moonshine-ai/moonshine?tab=readme-ov-file).
 
-Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. No cloud calls in the runtime path.
-
 ![Jazz Murmur AI art](docs/assets/jazz-murmur-ai.svg)
+
+Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. Default runtime path is local-only; optional smart rewrite can use OpenRouter.
 
 ```text
    ( speak )   ──▶   🫧 Murmur   ──▶   ( text appears )
@@ -16,6 +16,7 @@ Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the f
 - Local ASR via Moonshine (`moonshine_voice` primary, `moonshine_onnx` fallback).
 - Cross-app insertion (Accessibility direct write + clipboard fallback).
 - Disfluency-aware cleanup (basic stutter/repair handling).
+- Optional smart rewrite mode via OpenRouter (safe fallback on transport/API failure).
 - Recording start/stop feedback cues (sound + haptic in menu bar app runtime).
 - Menu bar runtime + simple CLI launcher.
 - Local transcript history on disk.
@@ -89,6 +90,49 @@ murmur logs
 murmur stop
 ```
 
+## Rewrite Modes
+
+`Murmur` supports two rewrite modes:
+
+- `smart` (default): deterministic cleanup + optional OpenRouter polish if API key is configured.
+- `literal`: minimal deterministic cleanup only, no LLM rewrite.
+
+By default, if no OpenRouter API key is set, smart mode still runs local deterministic cleanup and inserts immediately.
+
+Enable smart mode with OpenRouter:
+
+```bash
+export OPENROUTER_API_KEY="<your-token>"
+export MURMUR_REWRITE_MODE="smart"
+export MURMUR_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
+murmur run
+```
+
+Switch to literal mode:
+
+```bash
+export MURMUR_REWRITE_MODE="literal"
+murmur run
+```
+
+One-off override (without changing env):
+
+```bash
+murmur run --rewrite-mode literal
+murmur run --rewrite-mode smart --openrouter-model mistralai/mistral-small-3.1-24b-instruct
+```
+
+Configure rewrite mode from CLI (interactive):
+
+```bash
+murmur config
+```
+
+This opens a small prompt flow where you can:
+- choose `literal` or `smart`
+- set model id (smart mode)
+- enter/replace/clear your OpenRouter API key (smart mode)
+
 ## Configure Shortcut
 
 Show current shortcut:
@@ -145,8 +189,9 @@ Default location:
 2. Audio frames stream to Moonshine.
 3. On release, ASR finalizes once.
 4. Text is post-processed (cleanup, punctuation, casing).
-5. Insert into focused app field.
-6. Result + transcript line is logged locally.
+5. Optional smart rewrite runs (OpenRouter) and falls back to local text on API/transport error.
+6. Insert into focused app field.
+7. Result + transcript line is logged locally.
 
 ## Architecture
 
@@ -158,6 +203,7 @@ User Hotkey
      -> AudioCapture
      -> ASREngine (Moonshine Python bridge)
      -> TextPostProcessorV2
+     -> Optional OpenRouterTranscriptRewriter (smart mode only)
      -> FocusedFieldWriter
         -> Accessibility direct
         -> Clipboard paste fallback
@@ -169,8 +215,10 @@ User Hotkey
 
 ```bash
 murmur run
+murmur run --rewrite-mode literal|smart [--openrouter-model <id>]
 murmur setup [--python <python3>] [--skip-model-download] [--global]
 murmur start|stop|restart|status|logs
+murmur config [get|set ...]
 murmur shortcut get|set [combo]|reset
 murmur history [lines]
 murmur history-path
@@ -186,6 +234,7 @@ murmur uninstall
   - Accessibility
   - Input Monitoring
 - If ASR fails, run `murmur doctor` and verify `python` + script paths.
+- If smart rewrite is enabled, run `murmur doctor` to confirm rewrite mode/model and API key presence.
 - If insertion fails in secure fields, expected behavior is safe failure.
 
 ## Development Notes

@@ -8,21 +8,29 @@ LOG_FILE="/tmp/murmur-menubar.log"
 TRANSCRIPT_DIR="${MURMUR_TRANSCRIPTS_DIR:-$HOME/Library/Application Support/Murmur/transcriptions}"
 CONFIG_DIR="${MURMUR_CONFIG_DIR:-$HOME/Library/Application Support/Murmur}"
 SHORTCUT_FILE="$CONFIG_DIR/shortcut.txt"
+REWRITE_MODE_FILE="$CONFIG_DIR/rewrite_mode.txt"
+OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
+OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
+DEFAULT_REWRITE_MODE="smart"
+DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
 COMMAND_NAME="${0##*/}"
 
 usage() {
   cat <<USAGE
 Usage:
   ${COMMAND_NAME} setup [--python <python3>] [--skip-model-download] [--global]
-  ${COMMAND_NAME} run [--model <id>]
-  ${COMMAND_NAME} start [--model <id>]
+  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
+  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
   ${COMMAND_NAME} stop
-  ${COMMAND_NAME} restart [--model <id>]
+  ${COMMAND_NAME} restart [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
   ${COMMAND_NAME} status
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} history [lines]
   ${COMMAND_NAME} history-path
+  ${COMMAND_NAME} config
+  ${COMMAND_NAME} config get
+  ${COMMAND_NAME} config set [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} shortcut get
   ${COMMAND_NAME} shortcut set [combo]
   ${COMMAND_NAME} shortcut reset
@@ -35,6 +43,10 @@ Environment overrides:
   MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
   MURMUR_SETUP_PYTHON      Python executable used by setup (default: python3)
   MURMUR_SHORTCUT          Hotkey combo override (for example: ctrl+shift+space)
+  MURMUR_REWRITE_MODE      Rewrite mode: literal|smart (default: smart)
+  MURMUR_OPENROUTER_MODEL  OpenRouter model id for smart mode (default: mistralai/mistral-small-3.1-24b-instruct)
+  MURMUR_OPENROUTER_API_KEY  OpenRouter API token (preferred)
+  OPENROUTER_API_KEY       OpenRouter API token fallback
   MURMUR_TRANSCRIPTS_DIR   Transcription history folder (default: ~/Library/Application Support/Murmur/transcriptions)
   MURMUR_CONFIG_DIR        Config folder (default: ~/Library/Application Support/Murmur)
   MURMUR_BIN_DIR           Install directory for global CLI (default: ~/.local/bin)
@@ -46,6 +58,48 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+read_file_value() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+  local value
+  value="$(head -n 1 "$path" 2>/dev/null || true)"
+  value="$(trim "$value")"
+  if [[ -n "$value" ]]; then
+    printf '%s\n' "$value"
+  fi
+}
+
+write_config_value() {
+  local path="$1"
+  local value="$2"
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$value" >"$path"
+}
+
+write_secret_config_value() {
+  local path="$1"
+  local value="$2"
+  mkdir -p "$CONFIG_DIR"
+  (umask 177; printf '%s\n' "$value" >"$path")
+}
+
+normalize_rewrite_mode() {
+  local mode="$1"
+  mode="$(trim "$mode")"
+  mode="${mode,,}"
+  case "$mode" in
+    literal|smart)
+      printf '%s\n' "$mode"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 drain_tty_input() {
@@ -113,6 +167,134 @@ resolve_shortcut() {
   fi
 
   printf '%s\n' "$DEFAULT_SHORTCUT"
+}
+
+resolve_rewrite_mode() {
+  local mode
+  local env_mode="${MURMUR_REWRITE_MODE:-}"
+  env_mode="$(trim "$env_mode")"
+  if [[ -n "$env_mode" ]]; then
+    if mode="$(normalize_rewrite_mode "$env_mode" 2>/dev/null)"; then
+      printf '%s\n' "$mode"
+      return
+    fi
+    echo "warning: invalid MURMUR_REWRITE_MODE '$env_mode'; using defaults" >&2
+  fi
+
+  local file_mode
+  file_mode="$(read_file_value "$REWRITE_MODE_FILE" || true)"
+  if [[ -n "$file_mode" ]]; then
+    if mode="$(normalize_rewrite_mode "$file_mode" 2>/dev/null)"; then
+      printf '%s\n' "$mode"
+      return
+    fi
+    echo "warning: invalid rewrite mode in $REWRITE_MODE_FILE ('$file_mode'); using defaults" >&2
+  fi
+
+  printf '%s\n' "$DEFAULT_REWRITE_MODE"
+}
+
+rewrite_mode_source() {
+  local env_mode="${MURMUR_REWRITE_MODE:-}"
+  env_mode="$(trim "$env_mode")"
+  if [[ -n "$env_mode" ]]; then
+    printf '%s\n' "env:MURMUR_REWRITE_MODE"
+    return
+  fi
+  if [[ -f "$REWRITE_MODE_FILE" ]]; then
+    printf '%s\n' "file:$REWRITE_MODE_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
+resolve_openrouter_model() {
+  local env_model="${MURMUR_OPENROUTER_MODEL:-}"
+  env_model="$(trim "$env_model")"
+  if [[ -n "$env_model" ]]; then
+    printf '%s\n' "$env_model"
+    return
+  fi
+
+  local file_model
+  file_model="$(read_file_value "$OPENROUTER_MODEL_FILE" || true)"
+  if [[ -n "$file_model" ]]; then
+    printf '%s\n' "$file_model"
+    return
+  fi
+
+  printf '%s\n' "$DEFAULT_OPENROUTER_MODEL"
+}
+
+openrouter_model_source() {
+  local env_model="${MURMUR_OPENROUTER_MODEL:-}"
+  env_model="$(trim "$env_model")"
+  if [[ -n "$env_model" ]]; then
+    printf '%s\n' "env:MURMUR_OPENROUTER_MODEL"
+    return
+  fi
+  if [[ -f "$OPENROUTER_MODEL_FILE" ]]; then
+    printf '%s\n' "file:$OPENROUTER_MODEL_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
+resolve_openrouter_api_key() {
+  local env_key="${MURMUR_OPENROUTER_API_KEY:-}"
+  env_key="$(trim "$env_key")"
+  if [[ -n "$env_key" ]]; then
+    printf '%s\n' "$env_key"
+    return
+  fi
+
+  local env_fallback="${OPENROUTER_API_KEY:-}"
+  env_fallback="$(trim "$env_fallback")"
+  if [[ -n "$env_fallback" ]]; then
+    printf '%s\n' "$env_fallback"
+    return
+  fi
+
+  local file_key
+  file_key="$(read_file_value "$OPENROUTER_API_KEY_FILE" || true)"
+  if [[ -n "$file_key" ]]; then
+    printf '%s\n' "$file_key"
+    return
+  fi
+}
+
+openrouter_api_key_source() {
+  local env_key="${MURMUR_OPENROUTER_API_KEY:-}"
+  env_key="$(trim "$env_key")"
+  if [[ -n "$env_key" ]]; then
+    printf '%s\n' "env:MURMUR_OPENROUTER_API_KEY"
+    return
+  fi
+
+  local env_fallback="${OPENROUTER_API_KEY:-}"
+  env_fallback="$(trim "$env_fallback")"
+  if [[ -n "$env_fallback" ]]; then
+    printf '%s\n' "env:OPENROUTER_API_KEY"
+    return
+  fi
+
+  if [[ -f "$OPENROUTER_API_KEY_FILE" ]]; then
+    printf '%s\n' "file:$OPENROUTER_API_KEY_FILE"
+    return
+  fi
+
+  printf '%s\n' "unset"
+}
+
+openrouter_key_present() {
+  local key
+  key="$(resolve_openrouter_api_key || true)"
+  key="$(trim "$key")"
+  if [[ -n "$key" ]]; then
+    printf '%s\n' "yes"
+    return
+  fi
+  printf '%s\n' "no"
 }
 
 shortcut_source() {
@@ -217,6 +399,213 @@ shortcut_command() {
   esac
 }
 
+config_usage() {
+  cat <<USAGE
+usage: ${COMMAND_NAME} config [get|set]
+
+examples:
+  ${COMMAND_NAME} config
+  ${COMMAND_NAME} config get
+  ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+  ${COMMAND_NAME} config set --api-key sk-or-...
+  ${COMMAND_NAME} config set --clear-api-key
+USAGE
+}
+
+config_get() {
+  echo "rewrite_mode=$(resolve_rewrite_mode)"
+  echo "rewrite_mode_source=$(rewrite_mode_source)"
+  echo "openrouter_model=$(resolve_openrouter_model)"
+  echo "openrouter_model_source=$(openrouter_model_source)"
+  echo "openrouter_api_key_present=$(openrouter_key_present)"
+  echo "openrouter_api_key_source=$(openrouter_api_key_source)"
+}
+
+config_set_interactive() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "interactive config requires a TTY. use '${COMMAND_NAME} config set --mode ...' in non-interactive contexts." >&2
+    return 2
+  fi
+
+  local current_mode current_model key_source mode_input selected_mode model_input key_input keep_key
+  current_mode="$(resolve_rewrite_mode)"
+  current_model="$(resolve_openrouter_model)"
+  key_source="$(openrouter_api_key_source)"
+
+  echo "Murmur config"
+  echo "current rewrite mode: $current_mode"
+  echo "1) literal"
+  echo "2) smart (OpenRouter optional)"
+  if ! read -r -p "choose mode [1/2] (enter keeps '$current_mode'): " mode_input < /dev/tty; then
+    echo "config update cancelled"
+    return 1
+  fi
+  mode_input="$(trim "$mode_input")"
+  case "${mode_input,,}" in
+    "")
+      selected_mode="$current_mode"
+      ;;
+    1|literal)
+      selected_mode="literal"
+      ;;
+    2|smart)
+      selected_mode="smart"
+      ;;
+    *)
+      echo "invalid mode choice: $mode_input" >&2
+      return 2
+      ;;
+  esac
+  write_config_value "$REWRITE_MODE_FILE" "$selected_mode"
+
+  if [[ "$selected_mode" == "smart" ]]; then
+    if ! read -r -p "model id (enter keeps '$current_model'): " model_input < /dev/tty; then
+      echo "config update cancelled"
+      return 1
+    fi
+    model_input="$(trim "$model_input")"
+    if [[ -n "$model_input" ]]; then
+      write_config_value "$OPENROUTER_MODEL_FILE" "$model_input"
+    elif [[ ! -f "$OPENROUTER_MODEL_FILE" ]]; then
+      write_config_value "$OPENROUTER_MODEL_FILE" "$current_model"
+    fi
+
+    echo "api key source: $key_source"
+    if ! read -r -s -p "OpenRouter API key (enter keeps current, '-' clears stored key): " key_input < /dev/tty; then
+      echo
+      echo "config update cancelled"
+      return 1
+    fi
+    echo
+    key_input="$(trim "$key_input")"
+    if [[ "$key_input" == "-" ]]; then
+      rm -f "$OPENROUTER_API_KEY_FILE"
+    elif [[ -n "$key_input" ]]; then
+      write_secret_config_value "$OPENROUTER_API_KEY_FILE" "$key_input"
+    fi
+  else
+    if [[ "$(openrouter_key_present)" == "yes" ]]; then
+      if read -r -p "keep stored API key for future smart mode? [Y/n] " keep_key < /dev/tty; then
+        keep_key="$(trim "$keep_key")"
+        case "${keep_key,,}" in
+          n|no)
+            rm -f "$OPENROUTER_API_KEY_FILE"
+            ;;
+        esac
+      fi
+    fi
+  fi
+
+  echo "config updated:"
+  config_get
+  if is_running; then
+    echo "note: restart murmur for config changes to apply"
+  fi
+}
+
+config_set_non_interactive() {
+  local mode="" model="" api_key="" clear_api_key=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        if [[ $# -lt 2 ]]; then
+          echo "--mode requires a value (literal|smart)" >&2
+          return 2
+        fi
+        mode="$2"
+        shift 2
+        ;;
+      --model)
+        if [[ $# -lt 2 ]]; then
+          echo "--model requires a value" >&2
+          return 2
+        fi
+        model="$2"
+        shift 2
+        ;;
+      --api-key)
+        if [[ $# -lt 2 ]]; then
+          echo "--api-key requires a value" >&2
+          return 2
+        fi
+        api_key="$2"
+        shift 2
+        ;;
+      --clear-api-key)
+        clear_api_key=1
+        shift
+        ;;
+      -h|--help)
+        config_usage
+        return 0
+        ;;
+      *)
+        echo "unknown config option: $1" >&2
+        config_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$mode" && -z "$model" && -z "$api_key" && "$clear_api_key" -eq 0 ]]; then
+    config_set_interactive
+    return $?
+  fi
+
+  if [[ -n "$mode" ]]; then
+    if ! mode="$(normalize_rewrite_mode "$mode" 2>/dev/null)"; then
+      echo "invalid mode '$mode'; expected literal|smart" >&2
+      return 2
+    fi
+    write_config_value "$REWRITE_MODE_FILE" "$mode"
+  fi
+
+  model="$(trim "$model")"
+  if [[ -n "$model" ]]; then
+    write_config_value "$OPENROUTER_MODEL_FILE" "$model"
+  fi
+
+  api_key="$(trim "$api_key")"
+  if [[ -n "$api_key" ]]; then
+    write_secret_config_value "$OPENROUTER_API_KEY_FILE" "$api_key"
+  fi
+
+  if [[ "$clear_api_key" -eq 1 ]]; then
+    rm -f "$OPENROUTER_API_KEY_FILE"
+  fi
+
+  echo "config updated:"
+  config_get
+  if is_running; then
+    echo "note: restart murmur for config changes to apply"
+  fi
+}
+
+config_command() {
+  local action="${1:-set}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    get)
+      config_get
+      ;;
+    set)
+      config_set_non_interactive "$@"
+      ;;
+    -h|--help|help)
+      config_usage
+      ;;
+    *)
+      echo "unknown config action: $action" >&2
+      config_usage >&2
+      return 2
+      ;;
+  esac
+}
+
 ensure_build() {
   (cd "$ROOT_DIR" && swift build --product MurmurMenuBarApp >/dev/null)
 }
@@ -261,15 +650,34 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path shortcut_identifier
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
+  rewrite_mode="$(resolve_rewrite_mode)"
+  openrouter_model="$(resolve_openrouter_model)"
+  openrouter_api_key="$(resolve_openrouter_api_key || true)"
 
   ensure_build
   (
     cd "$ROOT_DIR"
-    nohup "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" --shortcut "$shortcut_identifier" "$@" >"$LOG_FILE" 2>&1 &
+    if [[ -n "$openrouter_api_key" ]]; then
+      MURMUR_OPENROUTER_API_KEY="$openrouter_api_key" nohup "$APP_BIN" \
+        --moonshine-python "$python_bin" \
+        --moonshine-script "$script_path" \
+        --shortcut "$shortcut_identifier" \
+        --rewrite-mode "$rewrite_mode" \
+        --openrouter-model "$openrouter_model" \
+        "$@" >"$LOG_FILE" 2>&1 &
+    else
+      nohup "$APP_BIN" \
+        --moonshine-python "$python_bin" \
+        --moonshine-script "$script_path" \
+        --shortcut "$shortcut_identifier" \
+        --rewrite-mode "$rewrite_mode" \
+        --openrouter-model "$openrouter_model" \
+        "$@" >"$LOG_FILE" 2>&1 &
+    fi
     echo $! >"$PID_FILE"
   )
 
@@ -284,14 +692,33 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path shortcut_identifier
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
+  rewrite_mode="$(resolve_rewrite_mode)"
+  openrouter_model="$(resolve_openrouter_model)"
+  openrouter_api_key="$(resolve_openrouter_api_key || true)"
 
   ensure_build
   cd "$ROOT_DIR"
-  exec "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" --shortcut "$shortcut_identifier" "$@"
+  if [[ -n "$openrouter_api_key" ]]; then
+    exec env MURMUR_OPENROUTER_API_KEY="$openrouter_api_key" "$APP_BIN" \
+      --moonshine-python "$python_bin" \
+      --moonshine-script "$script_path" \
+      --shortcut "$shortcut_identifier" \
+      --rewrite-mode "$rewrite_mode" \
+      --openrouter-model "$openrouter_model" \
+      "$@"
+  else
+    exec "$APP_BIN" \
+      --moonshine-python "$python_bin" \
+      --moonshine-script "$script_path" \
+      --shortcut "$shortcut_identifier" \
+      --rewrite-mode "$rewrite_mode" \
+      --openrouter-model "$openrouter_model" \
+      "$@"
+  fi
 }
 
 stop_bg() {
@@ -354,6 +781,12 @@ doctor() {
   echo "moonshine_script=$(resolve_script)"
   echo "shortcut=$(resolve_shortcut)"
   echo "shortcut_source=$(shortcut_source)"
+  echo "rewrite_mode=$(resolve_rewrite_mode)"
+  echo "rewrite_mode_source=$(rewrite_mode_source)"
+  echo "openrouter_model=$(resolve_openrouter_model)"
+  echo "openrouter_model_source=$(openrouter_model_source)"
+  echo "openrouter_api_key_present=$(openrouter_key_present)"
+  echo "openrouter_api_key_source=$(openrouter_api_key_source)"
   echo "history_dir=$TRANSCRIPT_DIR"
   if is_running; then
     echo "status=running pid=$(cat "$PID_FILE")"
@@ -593,6 +1026,9 @@ history)
   ;;
 history-path)
   history_path
+  ;;
+config)
+  config_command "$@"
   ;;
 shortcut)
   shortcut_command "$@"
