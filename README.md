@@ -1,6 +1,6 @@
 # Murmur 🎙️✨
 
-Local-first macOS dictation.
+Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moonshine-ai/moonshine?tab=readme-ov-file).
 
 Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. No cloud calls in the runtime path.
 
