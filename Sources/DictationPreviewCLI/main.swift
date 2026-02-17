@@ -36,7 +36,7 @@ struct DictationPreviewCLI {
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: AudioCapture(),
             asrEngine: ASREngine(),
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: statusUI,
             logger: logger
@@ -101,7 +101,7 @@ struct DictationPreviewCLI {
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
             asrEngine: asrEngine,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: statusUI,
             logger: logger
@@ -173,7 +173,7 @@ struct DictationPreviewCLI {
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
             asrEngine: asrEngine,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: statusUI,
             logger: logger
@@ -255,9 +255,9 @@ private struct Arguments {
     static let usage = """
     Usage:
       swift run DictationPreviewCLI --simulate "hello world"
-      swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --moonshine-live [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --hotkey-daemon [--model moonshine/tiny] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
     """
 
     let mode: Mode
@@ -271,21 +271,21 @@ private struct Arguments {
         }
 
         if let wavPath = value(after: "--moonshine-wav", in: rawArgs) {
-            let model = value(after: "--model", in: rawArgs) ?? "moonshine/tiny"
+            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
             let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
             let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
             return Arguments(mode: .moonshineWAV(path: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 
         if rawArgs.contains("--moonshine-live") {
-            let model = value(after: "--model", in: rawArgs) ?? "moonshine/tiny"
+            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
             let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
             let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
             return Arguments(mode: .moonshineLive(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
         }
 
         if rawArgs.contains("--hotkey-daemon") {
-            let model = value(after: "--model", in: rawArgs) ?? "moonshine/tiny"
+            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
             let pythonBinary = value(after: "--moonshine-python", in: rawArgs) ?? "python3"
             let scriptPath = value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
             return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))

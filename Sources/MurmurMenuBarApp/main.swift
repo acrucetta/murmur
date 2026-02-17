@@ -40,7 +40,7 @@ private struct Arguments {
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         Arguments(
-            model: value(after: "--model", in: rawArgs) ?? "moonshine/tiny",
+            model: value(after: "--model", in: rawArgs) ?? "medium-streaming-en",
             pythonBinary: value(after: "--moonshine-python", in: rawArgs) ?? "python3",
             scriptPath: value(after: "--moonshine-script", in: rawArgs) ?? "scripts/moonshine_transcribe.py"
         )
@@ -87,7 +87,7 @@ private final class MenuBarRuntime {
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
             asrEngine: asrEngine,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FocusedFieldWriter(),
             statusUI: statusUI,
             logger: logger
