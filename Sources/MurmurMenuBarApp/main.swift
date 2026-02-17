@@ -8,12 +8,16 @@ import DictationAppCore
 struct MurmurMenuBarApp {
     static func main() {
         let arguments = Arguments.parse(CommandLine.arguments)
+        if let warning = arguments.shortcutWarning {
+            Swift.print("warning=\(warning)")
+        }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
             model: arguments.model,
             pythonBinary: arguments.pythonBinary,
-            scriptPath: arguments.scriptPath
+            scriptPath: arguments.scriptPath,
+            hotkeyShortcuts: arguments.hotkeyShortcuts
         )
 
         let delegate = AppDelegate(
@@ -37,10 +41,14 @@ private struct Arguments {
     let model: String
     let pythonBinary: String
     let scriptPath: String
+    let hotkeyShortcuts: [HotkeyShortcut]
+    let shortcutWarning: String?
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         let currentDirectory = FileManager.default.currentDirectoryPath
         let environment = ProcessInfo.processInfo.environment
+        let shortcutIdentifier = value(after: "--shortcut", in: rawArgs)
+        let shortcutResolution = resolveHotkeyShortcuts(shortcutIdentifier: shortcutIdentifier)
 
         return Arguments(
             model: value(after: "--model", in: rawArgs) ?? "medium-streaming-en",
@@ -53,7 +61,9 @@ private struct Arguments {
                 explicit: value(after: "--moonshine-script", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
-            )
+            ),
+            hotkeyShortcuts: shortcutResolution.shortcuts,
+            shortcutWarning: shortcutResolution.warning
         )
     }
 
@@ -66,6 +76,23 @@ private struct Arguments {
             return nil
         }
         return args[next].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func resolveHotkeyShortcuts(shortcutIdentifier: String?) -> (shortcuts: [HotkeyShortcut], warning: String?) {
+        let defaults: [HotkeyShortcut] = [.defaultPushToTalk, .defaultBackupPushToTalk]
+        guard let shortcutIdentifier else {
+            return (defaults, nil)
+        }
+
+        guard let parsed = HotkeyShortcut.parse(identifier: shortcutIdentifier) else {
+            return (defaults, "invalid shortcut identifier '\(shortcutIdentifier)'; using defaults")
+        }
+
+        var resolved = [parsed]
+        if parsed != .defaultBackupPushToTalk {
+            resolved.append(.defaultBackupPushToTalk)
+        }
+        return (resolved, nil)
     }
 }
 
@@ -83,7 +110,8 @@ private final class MenuBarRuntime {
         menuBarController: MenuBarController,
         model: String,
         pythonBinary: String,
-        scriptPath: String
+        scriptPath: String,
+        hotkeyShortcuts: [HotkeyShortcut]
     ) {
         self.menuBarController = menuBarController
 
@@ -105,7 +133,7 @@ private final class MenuBarRuntime {
             transcriptHistory: transcriptHistory,
             logger: logger
         )
-        let hotkeyController = HotkeyController()
+        let hotkeyController = HotkeyController(shortcuts: hotkeyShortcuts)
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
             sessionEventHandler: orchestrator

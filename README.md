@@ -1,195 +1,159 @@
-# Murmur
+# Murmur 🎙️✨
 
-Local-first macOS dictation MVP.
+Local-first macOS dictation.
 
-Press a global hotkey, speak, release, and insert transcript text into the focused field with no cloud dependency in the runtime path.
+Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. No cloud calls in the runtime path.
 
-## Current Status
+```text
+   ( speak )   ──▶   🫧 Murmur   ──▶   ( text appears )
+```
 
-Implemented:
-- Global push-to-talk hotkeys (`Ctrl+Shift+Space`, backup `Ctrl+Shift+D`).
-- Local Moonshine transcription path via Python bridge.
-- Cross-app insertion with Accessibility primary path + clipboard fallback.
-- Menu bar app scaffold with live state and error indicators.
-- Deterministic text cleanup and latency metrics in logs.
+## Features
 
-In progress:
-- Hardening for reliability/perf targets from the MVP spec.
+- Global push-to-talk hotkey with configurable primary shortcut.
+- Local ASR via Moonshine (`moonshine_voice` primary, `moonshine_onnx` fallback).
+- Cross-app insertion (Accessibility direct write + clipboard fallback).
+- Disfluency-aware cleanup (basic stutter/repair handling).
+- Menu bar runtime + simple CLI launcher.
+- Local transcript history on disk.
 
-## Quick Start
+## Install
 
-### 1) Python environment (for Moonshine bridge)
+### 1) Clone + Python env
 
 ```bash
+git clone git@github.com:acrucetta/murmur.git
+cd murmur
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install moonshine-voice useful-moonshine-onnx
 python -m moonshine_voice.download --language en
 ```
 
-### 2) Build and run tests
+### 2) Build and test
 
 ```bash
 swift build
 swift test
 ```
 
-### 3) Run menu bar app (recommended MVP flow)
-
-```bash
-./murmur run
-```
-
-What you get:
-- Menu bar icon.
-- Global hotkey dictation.
-- Status menu: state, backend, last error, partial transcript.
-- Default model: `medium-streaming-en` via `moonshine_voice`.
-- Fallback backend: `moonshine_onnx` if `moonshine_voice` is unavailable.
-
-### 4) Foreground vs background
-
-```bash
-./murmur run      # foreground (attached to current terminal)
-./murmur start
-./murmur status
-./murmur logs
-./murmur stop
-```
-
-`run` keeps the process attached to your current shell.
-`start` daemonizes it in the background and writes logs to `/tmp/murmur-menubar.log`.
-
-### 5) Transcript history (local)
-
-```bash
-./murmur history-path
-./murmur history
-./murmur history 200
-```
-
-Optional global install (so you can run `murmur` from anywhere):
+### 3) Install CLI command globally (optional)
 
 ```bash
 ./murmur install
+```
+
+After this, use `murmur ...` from anywhere.
+
+## Quick Start
+
+Run in foreground:
+
+```bash
+murmur run
+```
+
+Run in background:
+
+```bash
+murmur start
 murmur status
+murmur logs
+murmur stop
 ```
 
-## Run Modes
+## Configure Shortcut
 
-### Menu bar app
+Show current shortcut:
 
 ```bash
-./murmur run
+murmur shortcut get
 ```
 
-Equivalent direct command (now auto-resolves `.venv` Python if present):
+Set a new primary shortcut:
 
 ```bash
-swift run MurmurMenuBarApp
+murmur shortcut set "ctrl+option+space"
 ```
 
-### Hotkey daemon CLI
+Reset to default:
 
 ```bash
-swift run DictationPreviewCLI --hotkey-daemon
+murmur shortcut reset
 ```
 
-### Live mic preview (press Enter to start/stop)
+Notes:
+- Primary default: `ctrl+shift+space`
+- Backup remains enabled: `ctrl+shift+d`
+- Restart Murmur after changing shortcut.
+
+## Transcript History
+
+View where transcripts are stored:
 
 ```bash
-swift run DictationPreviewCLI --moonshine-live
+murmur history-path
 ```
 
-Behavior:
-- Speech is captured while listening.
-- Final text is inserted once on stop/release after cleanup.
-- No live text is injected into the target field while you speak.
-
-### WAV transcription preview
+Show recent transcript lines:
 
 ```bash
-swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav
+murmur history
+murmur history 200
 ```
 
-### Simulation path (no mic/model)
-
-```bash
-swift run DictationPreviewCLI --simulate "hello world from murmur"
-```
-
-## Hotkeys
-
-- Primary: `Ctrl + Shift + Space`
-- Backup: `Ctrl + Shift + D`
-
-## Architecture Snapshot
-
-```text
-HotkeyController
-   -> SessionOrchestrator (state machine)
-      -> PermissionManager
-      -> AudioCapture -> ASREngine (Moonshine bridge)
-      -> TextPostProcessor
-      -> FocusedFieldWriter (AX primary, clipboard fallback)
-      -> StatusUI (menu bar + lightweight state)
-```
-
-`SessionOrchestrator` owns cross-module workflow. Modules communicate through typed events/contracts.
-
-## Logs and Diagnostics
-
-Common metrics/events:
-- `hotkey_daemon=running ...`
-- `hotkey_event=pressed|released`
-- `state=listening|finalizing|inserting|idle`
-- `metric release_to_final_ms=<n>`
-- `metric release_to_insert_ms=<n>`
-
-Menu bar startup diagnostics:
-- `metric menu_button_configured ...`
-- `metric menu_bar_diagnostics status_item=true ...`
-
-Launcher logs:
-- `/tmp/murmur-menubar.log`
-- `/tmp/murmur-menubar.pid`
-
-Transcript history:
+Default location:
 - `~/Library/Application Support/Murmur/transcriptions/`
 
-## Permissions Checklist (macOS)
+## How It Works
 
-Enable for your terminal/app runner:
-- Microphone
-- Accessibility
-- Input Monitoring
-- Screen Recording (only if you use screenshot tooling)
+1. Global hotkey press starts local audio capture.
+2. Audio frames stream to Moonshine.
+3. On release, ASR finalizes once.
+4. Text is post-processed (cleanup, punctuation, casing).
+5. Insert into focused app field.
+6. Result + transcript line is logged locally.
 
-## Project Layout
+## Architecture
 
 ```text
-Sources/
-  DictationAppCore/
-  DictationPreviewCLI/
-  MurmurMenuBarApp/
-Tests/
-docs/
-  product-specs/
-  exec-plans/
-  agents/
+User Hotkey
+  -> HotkeyController
+  -> SessionOrchestrator (state machine)
+     -> PermissionManager
+     -> AudioCapture
+     -> ASREngine (Moonshine Python bridge)
+     -> TextPostProcessorV2
+     -> FocusedFieldWriter
+        -> Accessibility direct
+        -> Clipboard paste fallback
+     -> TranscriptHistoryStore (local files)
+     -> StatusUI (menu bar)
 ```
 
-## Documentation Map
+## CLI Reference
+
+```bash
+murmur run
+murmur start|stop|restart|status|logs
+murmur shortcut get|set <combo>|reset
+murmur history [lines]
+murmur history-path
+murmur doctor
+murmur install|uninstall
+```
+
+## Troubleshooting
+
+- If hotkey does nothing, verify macOS permissions for the launching app:
+  - Microphone
+  - Accessibility
+  - Input Monitoring
+- If ASR fails, run `murmur doctor` and verify `python` + script paths.
+- If insertion fails in secure fields, expected behavior is safe failure.
+
+## Development Notes
 
 - Product spec: `docs/product-specs/macos-local-dictation-mvp.md`
-- Moonshine setup: `docs/product-specs/moonshine-local-setup.md`
-- Docs index: `docs/index.md`
-- Agent guide: `docs/agents/README.md`
-- Architecture ASCII: `docs/agents/ARCHITECTURE_ASCII.md`
-
-## Development Workflow
-
-- Spec-driven for non-trivial changes.
-- TDD default: `red -> green -> refactor`.
-- Keep diffs narrow and module boundaries strict.
-- Always report what was verified and what was not run.
+- Moonshine setup details: `docs/product-specs/moonshine-local-setup.md`
+- Agent docs index: `docs/index.md`

@@ -6,6 +6,9 @@ APP_BIN="$ROOT_DIR/.build/debug/MurmurMenuBarApp"
 PID_FILE="/tmp/murmur-menubar.pid"
 LOG_FILE="/tmp/murmur-menubar.log"
 TRANSCRIPT_DIR="${MURMUR_TRANSCRIPTS_DIR:-$HOME/Library/Application Support/Murmur/transcriptions}"
+CONFIG_DIR="${MURMUR_CONFIG_DIR:-$HOME/Library/Application Support/Murmur}"
+SHORTCUT_FILE="$CONFIG_DIR/shortcut.txt"
+DEFAULT_SHORTCUT="ctrl+shift+space"
 COMMAND_NAME="${0##*/}"
 
 usage() {
@@ -19,6 +22,9 @@ Usage:
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} history [lines]
   ${COMMAND_NAME} history-path
+  ${COMMAND_NAME} shortcut get
+  ${COMMAND_NAME} shortcut set <combo>
+  ${COMMAND_NAME} shortcut reset
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} install
   ${COMMAND_NAME} uninstall
@@ -26,7 +32,9 @@ Usage:
 Environment overrides:
   MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
   MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
+  MURMUR_SHORTCUT          Hotkey combo override (for example: ctrl+shift+space)
   MURMUR_TRANSCRIPTS_DIR   Transcription history folder (default: ~/Library/Application Support/Murmur/transcriptions)
+  MURMUR_CONFIG_DIR        Config folder (default: ~/Library/Application Support/Murmur)
   MURMUR_BIN_DIR           Install directory for global CLI (default: ~/.local/bin)
 USAGE
 }
@@ -77,6 +85,95 @@ resolve_script() {
   printf '%s\n' "scripts/moonshine_transcribe.py"
 }
 
+resolve_shortcut() {
+  local env_shortcut="${MURMUR_SHORTCUT:-}"
+  env_shortcut="$(trim "$env_shortcut")"
+  if [[ -n "$env_shortcut" ]]; then
+    printf '%s\n' "$env_shortcut"
+    return
+  fi
+
+  if [[ -f "$SHORTCUT_FILE" ]]; then
+    local file_shortcut
+    file_shortcut="$(head -n 1 "$SHORTCUT_FILE" 2>/dev/null || true)"
+    file_shortcut="$(trim "$file_shortcut")"
+    if [[ -n "$file_shortcut" ]]; then
+      printf '%s\n' "$file_shortcut"
+      return
+    fi
+  fi
+
+  printf '%s\n' "$DEFAULT_SHORTCUT"
+}
+
+shortcut_source() {
+  local env_shortcut="${MURMUR_SHORTCUT:-}"
+  env_shortcut="$(trim "$env_shortcut")"
+  if [[ -n "$env_shortcut" ]]; then
+    printf '%s\n' "env:MURMUR_SHORTCUT"
+    return
+  fi
+  if [[ -f "$SHORTCUT_FILE" ]]; then
+    printf '%s\n' "file:$SHORTCUT_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
+shortcut_get() {
+  echo "shortcut=$(resolve_shortcut)"
+  echo "source=$(shortcut_source)"
+}
+
+shortcut_set() {
+  local shortcut="${1:-}"
+  shortcut="$(trim "$shortcut")"
+  if [[ -z "$shortcut" ]]; then
+    echo "shortcut value is required" >&2
+    return 2
+  fi
+
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$shortcut" >"$SHORTCUT_FILE"
+  echo "shortcut set to $shortcut"
+  echo "config_file=$SHORTCUT_FILE"
+  if is_running; then
+    echo "note: restart murmur for shortcut changes to apply"
+  fi
+}
+
+shortcut_reset() {
+  rm -f "$SHORTCUT_FILE"
+  echo "shortcut reset to default ($DEFAULT_SHORTCUT)"
+  if is_running; then
+    echo "note: restart murmur for shortcut changes to apply"
+  fi
+}
+
+shortcut_command() {
+  local action="${1:-get}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    get)
+      shortcut_get
+      ;;
+    set)
+      shortcut_set "$@"
+      ;;
+    reset)
+      shortcut_reset
+      ;;
+    *)
+      echo "unknown shortcut action: $action" >&2
+      echo "usage: $COMMAND_NAME shortcut [get|set <combo>|reset]" >&2
+      return 2
+      ;;
+  esac
+}
+
 ensure_build() {
   (cd "$ROOT_DIR" && swift build --product MurmurMenuBarApp >/dev/null)
 }
@@ -106,14 +203,15 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path
+  local python_bin script_path shortcut_identifier
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
+  shortcut_identifier="$(resolve_shortcut)"
 
   ensure_build
   (
     cd "$ROOT_DIR"
-    nohup "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" "$@" >"$LOG_FILE" 2>&1 &
+    nohup "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" --shortcut "$shortcut_identifier" "$@" >"$LOG_FILE" 2>&1 &
     echo $! >"$PID_FILE"
   )
 
@@ -128,13 +226,14 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path
+  local python_bin script_path shortcut_identifier
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
+  shortcut_identifier="$(resolve_shortcut)"
 
   ensure_build
   cd "$ROOT_DIR"
-  exec "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" "$@"
+  exec "$APP_BIN" --moonshine-python "$python_bin" --moonshine-script "$script_path" --shortcut "$shortcut_identifier" "$@"
 }
 
 stop_bg() {
@@ -195,6 +294,8 @@ doctor() {
   echo "binary=$APP_BIN"
   echo "python=$(resolve_python)"
   echo "moonshine_script=$(resolve_script)"
+  echo "shortcut=$(resolve_shortcut)"
+  echo "shortcut_source=$(shortcut_source)"
   echo "history_dir=$TRANSCRIPT_DIR"
   if is_running; then
     echo "status=running pid=$(cat "$PID_FILE")"
@@ -253,6 +354,9 @@ history)
   ;;
 history-path)
   history_path
+  ;;
+shortcut)
+  shortcut_command "$@"
   ;;
 doctor)
   doctor
