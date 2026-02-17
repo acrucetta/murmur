@@ -20,7 +20,7 @@ struct SessionOrchestratorTests {
             permissionManager: permissions,
             audioCapture: audio,
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FakeFieldWriter(),
             statusUI: statusUI,
             logger: NoopLogger()
@@ -47,7 +47,7 @@ struct SessionOrchestratorTests {
             permissionManager: permissions,
             audioCapture: audio,
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: StatusUISpy(),
             logger: logger,
@@ -83,7 +83,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: FakeAudioCapture(),
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: StatusUISpy(),
             logger: NoopLogger()
@@ -108,7 +108,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: FakeAudioCapture(),
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FakeFieldWriter(),
             statusUI: statusUI,
             logger: NoopLogger()
@@ -131,7 +131,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: audio,
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FakeFieldWriter(),
             statusUI: StatusUISpy(),
             logger: NoopLogger()
@@ -159,7 +159,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: FakeAudioCapture(),
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: writer,
             statusUI: StatusUISpy(),
             logger: NoopLogger()
@@ -181,7 +181,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: FakeAudioCapture(),
             asrEngine: FakeASREngine(),
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FakeFieldWriter(),
             statusUI: statusUI,
             logger: NoopLogger()
@@ -201,7 +201,7 @@ struct SessionOrchestratorTests {
             permissionManager: FakePermissionManager(snapshot: .allGranted),
             audioCapture: FakeAudioCapture(),
             asrEngine: asr,
-            postProcessor: DeterministicTextPostProcessor(),
+            postProcessor: TextPostProcessorV2(),
             fieldWriter: FakeFieldWriter(),
             statusUI: StatusUISpy(),
             logger: NoopLogger()
