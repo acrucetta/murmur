@@ -19,14 +19,14 @@ User shortcut
     v                               v
 +---------------------+        +---------------------+
 |  PermissionManager  |        |      StatusUI       |
-|       (stub)        |        |       (stub)        |
+| runtime checks flow |        | menu + cli feedback |
 +---------------------+        +---------------------+
     | granted
     v
-+---------------------+        +---------------------+
-|    AudioCapture     |------->|      ASREngine      |
-|       (stub)        | frames |       (stub)        |
-+---------------------+        +---------------------+
++---------------------+        +------------------------------+
+|    AudioCapture     |------->|      ASREngine               |
+| AVAudioEngine frames| frames | MoonshineProcessASREngine    |
++---------------------+        +------------------------------+
             ^                            |
             |                            | PartialTranscript
             +------ AudioFrame ----------+
@@ -38,7 +38,7 @@ User shortcut
                                      | FinalTranscript
                                      v
                               +----------------------+
-                              |  TextPostProcessor   |
+                              | TextPostProcessorV2  |
                               +----------------------+
                                      |
                                      v
@@ -50,14 +50,17 @@ User shortcut
                                      v
                                 InsertResult
 
-Cross-cutting: SettingsStore, Logger (infra stubs)
+Cross-cutting: SettingsStore, Logger
 Fast loop: DictationPreviewCLI (simulated transcript path)
 Moonshine bridge:
   DictationPreviewCLI --moonshine-wav <file> -> MoonshineProcessASREngine
-  -> python script (scripts/moonshine_transcribe.py) -> local Moonshine ONNX runtime
+  -> python script (scripts/moonshine_transcribe.py)
+  -> moonshine_voice (primary, medium-streaming-en default)
+  -> moonshine_onnx (fallback)
 Live bridge:
   DictationPreviewCLI --moonshine-live -> AudioCapture (AVAudioEngine frames)
   -> SessionOrchestrator .audioFrame -> MoonshineProcessASREngine finalize
+  -> deferred insertion on key release (no live field insertion)
 Hotkey daemon bridge:
   DictationPreviewCLI --hotkey-daemon -> HotkeySessionBridge
   -> SessionOrchestrator shortcut events

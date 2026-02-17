@@ -4,18 +4,20 @@ Use this to enable local WAV transcription in the preview CLI.
 
 ## 1) Install local Python dependency
 ```bash
-pip install useful-moonshine-onnx
+pip install moonshine-voice useful-moonshine-onnx
+python -m moonshine_voice.download --language en
 ```
 If Homebrew Python blocks global installs (`externally-managed-environment`), use a venv:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install useful-moonshine-onnx
+python -m pip install moonshine-voice useful-moonshine-onnx
+python -m moonshine_voice.download --language en
 ```
 
 ## 2) Run Moonshine preview against a WAV file
 ```bash
-swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav --model moonshine/tiny
+swift run DictationPreviewCLI --moonshine-wav /absolute/path/to/audio.wav
 ```
 
 ## 3) Run Moonshine preview from live microphone capture
@@ -51,9 +53,18 @@ nohup ./.build/debug/DictationPreviewCLI --hotkey-daemon --moonshine-python "$(p
 Optional flags:
 - `--moonshine-python /path/to/python3`
 - `--moonshine-script /path/to/scripts/moonshine_transcribe.py`
+- `--model medium-streaming-en` (default)
+
+Advanced script flags (passed via `--moonshine-script` custom wrapper):
+- `--backend auto|voice|onnx` (default `auto`)
+- `--voice-model-path /absolute/path/to/model_dir`
+- `--voice-model-arch medium-streaming|small-streaming|...`
+- `--max-tokens-per-second <int>`
+- `--vad-threshold <float>`
 
 ## Notes
 - This path is fully local/offline after model assets are available on disk.
+- `scripts/moonshine_transcribe.py` tries `moonshine_voice` first, then falls back to `moonshine_onnx`.
 - Live mode quality depends on local microphone/input settings and speaking during capture window.
 
 ## Troubleshooting daemon/hotkeys

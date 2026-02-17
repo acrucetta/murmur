@@ -23,7 +23,8 @@ In progress:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install useful-moonshine-onnx
+python -m pip install moonshine-voice useful-moonshine-onnx
+python -m moonshine_voice.download --language en
 ```
 
 ### 2) Build and run tests
@@ -43,6 +44,8 @@ What you get:
 - Menu bar icon.
 - Global hotkey dictation.
 - Status menu: state, backend, last error, partial transcript.
+- Default model: `medium-streaming-en` via `moonshine_voice`.
+- Fallback backend: `moonshine_onnx` if `moonshine_voice` is unavailable.
 
 ## Run Modes
 
@@ -63,6 +66,11 @@ swift run DictationPreviewCLI --hotkey-daemon --moonshine-python "$(pwd)/.venv/b
 ```bash
 swift run DictationPreviewCLI --moonshine-live --moonshine-python "$(pwd)/.venv/bin/python3"
 ```
+
+Behavior:
+- Speech is captured while listening.
+- Final text is inserted once on stop/release after cleanup.
+- No live text is injected into the target field while you speak.
 
 ### WAV transcription preview
 
