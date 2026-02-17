@@ -27,6 +27,13 @@ struct DictationPreviewCLI {
             runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier)
         case .captureShortcut:
             runCaptureShortcut()
+        case .configWizard(let configDir, let defaultShortcut, let defaultRewriteMode, let defaultOpenRouterModel):
+            runConfigWizard(
+                configDir: configDir,
+                defaultShortcut: defaultShortcut,
+                defaultRewriteMode: defaultRewriteMode,
+                defaultOpenRouterModel: defaultOpenRouterModel
+            )
         case .invalid:
             print(Arguments.usage)
         }
@@ -276,6 +283,39 @@ struct DictationPreviewCLI {
 #endif
     }
 
+    private static func runConfigWizard(
+        configDir: String,
+        defaultShortcut: String,
+        defaultRewriteMode: String,
+        defaultOpenRouterModel: String
+    ) {
+        guard TerminalPrompts.isInteractiveTTY else {
+            fputs("interactive config requires a TTY.\n", stderr)
+            terminateProcess(2)
+        }
+
+        let config = ConfigWizardStore(
+            configDir: configDir,
+            defaultShortcut: defaultShortcut,
+            defaultRewriteMode: defaultRewriteMode,
+            defaultOpenRouterModel: defaultOpenRouterModel
+        )
+
+        do {
+            try ConfigWizard(prompts: TerminalPrompts(), store: config).run()
+            return
+        } catch ConfigWizardError.cancelled {
+            fputs("config update cancelled\n", stderr)
+            terminateProcess(1)
+        } catch ConfigWizardError.invalid(let message) {
+            fputs("invalid input: \(message)\n", stderr)
+            terminateProcess(2)
+        } catch {
+            fputs("config wizard failed: \(error.localizedDescription)\n", stderr)
+            terminateProcess(1)
+        }
+    }
+
     private static func resolveHotkeyShortcuts(shortcutIdentifier: String?) -> (shortcuts: [HotkeyShortcut], warning: String?) {
         let defaults: [HotkeyShortcut] = [.defaultPushToTalk, .defaultBackupPushToTalk]
         guard let shortcutIdentifier else {
@@ -294,6 +334,548 @@ struct DictationPreviewCLI {
     }
 }
 
+private enum ConfigWizardError: Error {
+    case cancelled
+    case invalid(String)
+}
+
+private enum ShortcutSelection {
+    case keep
+    case set(String)
+    case reset
+}
+
+private enum APIKeySelection {
+    case keep
+    case set(String)
+    case clear
+}
+
+private struct ConfigWizardState {
+    let currentShortcut: String
+    let currentRewriteMode: String
+    let currentModel: String
+    let apiKeyStored: Bool
+    let apiKeySource: String
+}
+
+private struct ConfigWizardStore {
+    let configDir: String
+    let defaultShortcut: String
+    let defaultRewriteMode: String
+    let defaultOpenRouterModel: String
+
+    var shortcutPath: String { "\(configDir)/shortcut.txt" }
+    var rewriteModePath: String { "\(configDir)/rewrite_mode.txt" }
+    var modelPath: String { "\(configDir)/openrouter_model.txt" }
+    var apiKeyPath: String { "\(configDir)/openrouter_api_key.txt" }
+
+    func load() -> ConfigWizardState {
+        let shortcut = readValue(path: shortcutPath) ?? defaultShortcut
+        let rewriteMode = normalizeRewriteMode(readValue(path: rewriteModePath)) ?? normalizeRewriteMode(defaultRewriteMode) ?? "smart"
+        let model = readValue(path: modelPath) ?? defaultOpenRouterModel
+        let apiKeyStored = (readValue(path: apiKeyPath) ?? "").isEmpty == false
+        let apiKeySource = apiKeyStored ? "file:\(apiKeyPath)" : "unset"
+        return .init(
+            currentShortcut: shortcut,
+            currentRewriteMode: rewriteMode,
+            currentModel: model,
+            apiKeyStored: apiKeyStored,
+            apiKeySource: apiKeySource
+        )
+    }
+
+    func persist(
+        shortcut: ShortcutSelection,
+        rewriteMode: String,
+        openRouterModel: String?,
+        apiKey: APIKeySelection
+    ) throws {
+        try ensureConfigDir()
+        try writeValue(path: rewriteModePath, value: rewriteMode)
+        if let openRouterModel {
+            try writeValue(path: modelPath, value: openRouterModel)
+        }
+
+        switch shortcut {
+        case .keep:
+            break
+        case .set(let value):
+            try writeValue(path: shortcutPath, value: value)
+        case .reset:
+            try removeFile(path: shortcutPath)
+        }
+
+        switch apiKey {
+        case .keep:
+            break
+        case .set(let token):
+            try writeValue(path: apiKeyPath, value: token, secret: true)
+        case .clear:
+            try removeFile(path: apiKeyPath)
+        }
+    }
+
+    private func ensureConfigDir() throws {
+        try FileManager.default.createDirectory(
+            atPath: configDir,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+    }
+
+    private func readValue(path: String) -> String? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let value = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func writeValue(path: String, value: String, secret: Bool = false) throws {
+        let payload = "\(value)\n"
+        guard let data = payload.data(using: .utf8) else {
+            throw ConfigWizardError.invalid("failed to encode value for \(path)")
+        }
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        if secret {
+            try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: Int(0o600))], ofItemAtPath: path)
+        }
+    }
+
+    private func removeFile(path: String) throws {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return
+        }
+        try FileManager.default.removeItem(atPath: path)
+    }
+}
+
+private struct ConfigWizard {
+    let prompts: TerminalPrompts
+    let store: ConfigWizardStore
+
+    func run() throws {
+        let current = store.load()
+
+        prompts.hero(title: "Murmur Quick Config")
+        prompts.note("config dir: \(store.configDir)")
+        prompts.note("env vars still override persisted config at runtime")
+        prompts.blank()
+
+        let shortcutSelection = try promptShortcut(current: current.currentShortcut)
+        let rewriteMode = try promptRewriteMode(current: current.currentRewriteMode)
+        let model: String?
+        let apiKeySelection: APIKeySelection
+
+        if rewriteMode == "smart" {
+            model = try promptOpenRouterModel(current: current.currentModel)
+            apiKeySelection = try promptAPIKeyAction(source: current.apiKeySource)
+        } else {
+            model = nil
+            apiKeySelection = try promptLiteralModeAPIKeyAction(hasStoredKey: current.apiKeyStored)
+        }
+
+        prompts.blank()
+        prompts.step(5, of: 5, title: "Review and Apply")
+        switch shortcutSelection {
+        case .keep:
+            prompts.item("Shortcut: keep '\(current.currentShortcut)'")
+        case .set(let value):
+            prompts.item("Shortcut: set to '\(value)'")
+        case .reset:
+            prompts.item("Shortcut: reset to default (\(store.defaultShortcut))")
+        }
+        prompts.item("Rewrite mode: \(rewriteMode)")
+        if let model {
+            prompts.item("OpenRouter model: \(model)")
+        }
+        switch apiKeySelection {
+        case .keep:
+            prompts.item("OpenRouter API key: keep existing source (\(current.apiKeySource))")
+        case .set:
+            prompts.item("OpenRouter API key: set/replace stored value")
+        case .clear:
+            prompts.item("OpenRouter API key: clear stored value")
+        }
+
+        prompts.blank()
+        guard try prompts.confirm("Apply these changes? [y/N]: ", defaultYes: false) else {
+            throw ConfigWizardError.cancelled
+        }
+
+        try store.persist(
+            shortcut: shortcutSelection,
+            rewriteMode: rewriteMode,
+            openRouterModel: model,
+            apiKey: apiKeySelection
+        )
+        prompts.blank()
+        prompts.success("Config saved.")
+    }
+
+    private func promptShortcut(current: String) throws -> ShortcutSelection {
+        prompts.step(1, of: 5, title: "Shortcut")
+        prompts.item("Current: \(current)")
+        prompts.item("1) Keep current")
+        prompts.item("2) Capture new shortcut")
+        prompts.item("3) Type shortcut manually")
+        prompts.item("4) Reset to default (\(store.defaultShortcut))")
+
+        let choice = try prompts.choice(
+            prompt: "Shortcut action [1/2/3/4] (Enter keeps current): ",
+            defaultValue: "1",
+            valid: ["1", "2", "3", "4"]
+        )
+
+        switch choice {
+        case "1":
+            return .keep
+        case "2":
+            do {
+                let captured = try captureShortcutWithFallback()
+                return .set(captured)
+            } catch ConfigWizardError.cancelled {
+                throw ConfigWizardError.cancelled
+            } catch {
+                prompts.warn("shortcut capture failed: \(error.localizedDescription)")
+                guard try prompts.confirm("Type shortcut manually instead? [Y/n]: ", defaultYes: true) else {
+                    throw ConfigWizardError.invalid("unable to capture shortcut")
+                }
+                let manual = try prompts.requiredText("Shortcut combo: ")
+                return .set(manual)
+            }
+        case "3":
+            let manual = try prompts.requiredText("Shortcut combo: ")
+            return .set(manual)
+        case "4":
+            return .reset
+        default:
+            throw ConfigWizardError.invalid("unknown shortcut option")
+        }
+    }
+
+    private func captureShortcutWithFallback() throws -> String {
+        prompts.blank()
+        prompts.note("capture mode: press desired shortcut now (Escape to cancel).")
+        let output = try runCaptureShortcutSubprocess()
+
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if let shortcutLine = lines.first(where: { $0.hasPrefix("shortcut=") }) {
+            let value = String(shortcutLine.dropFirst("shortcut=".count))
+            if !value.isEmpty {
+                prompts.success("Captured: \(value)")
+                return value
+            }
+        }
+
+        if let errorLine = lines.first(where: { $0.hasPrefix("error=") }) {
+            if errorLine == "error=shortcut_capture_cancelled" {
+                throw ConfigWizardError.cancelled
+            }
+            let detailLine = lines.first(where: { $0.hasPrefix("details=") }) ?? errorLine
+            throw ConfigWizardError.invalid(detailLine.replacingOccurrences(of: "details=", with: ""))
+        }
+
+        throw ConfigWizardError.invalid("shortcut capture returned unexpected output")
+    }
+
+    private func runCaptureShortcutSubprocess() throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.arguments = ["--capture-shortcut"]
+        let captureInput = FileHandle(forReadingAtPath: "/dev/tty")
+        process.standardInput = captureInput ?? FileHandle.standardInput
+        process.standardError = FileHandle.standardError
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+        try? captureInput?.close()
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else {
+            throw ConfigWizardError.invalid("failed to decode shortcut capture output")
+        }
+        if process.terminationStatus != 0 && output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ConfigWizardError.invalid("shortcut capture process exited with status \(process.terminationStatus)")
+        }
+        return output
+    }
+
+    private func promptRewriteMode(current: String) throws -> String {
+        prompts.blank()
+        prompts.step(2, of: 5, title: "Rewrite Mode")
+        prompts.item("Current: \(current)")
+        prompts.item("1) literal")
+        prompts.item("2) smart (OpenRouter optional)")
+
+        let defaultValue = current == "literal" ? "1" : "2"
+        let choice = try prompts.choice(
+            prompt: "Rewrite mode [1/2] (Enter keeps current): ",
+            defaultValue: defaultValue,
+            valid: ["1", "2"]
+        )
+
+        return choice == "1" ? "literal" : "smart"
+    }
+
+    private func promptOpenRouterModel(current: String) throws -> String {
+        prompts.blank()
+        prompts.step(3, of: 5, title: "OpenRouter Model")
+        return try prompts.text(prompt: "Model id (Enter keeps '\(current)'): ", defaultValue: current)
+    }
+
+    private func promptAPIKeyAction(source: String) throws -> APIKeySelection {
+        prompts.blank()
+        prompts.step(4, of: 5, title: "OpenRouter API Key")
+        prompts.item("Current source: \(source)")
+        prompts.item("1) Keep current")
+        prompts.item("2) Set/replace stored key")
+        prompts.item("3) Clear stored key")
+
+        let choice = try prompts.choice(
+            prompt: "API key action [1/2/3] (Enter keeps current): ",
+            defaultValue: "1",
+            valid: ["1", "2", "3"]
+        )
+        switch choice {
+        case "1":
+            return .keep
+        case "2":
+            let token = try prompts.requiredSecret("OpenRouter API key: ")
+            return .set(token)
+        case "3":
+            return .clear
+        default:
+            throw ConfigWizardError.invalid("unknown API key option")
+        }
+    }
+
+    private func promptLiteralModeAPIKeyAction(hasStoredKey: Bool) throws -> APIKeySelection {
+        guard hasStoredKey else {
+            return .keep
+        }
+        prompts.blank()
+        prompts.step(4, of: 5, title: "OpenRouter API Key")
+        guard try prompts.confirm("Clear stored API key while using literal mode? [y/N]: ", defaultYes: false) else {
+            return .keep
+        }
+        return .clear
+    }
+}
+
+private struct TerminalPrompts {
+    private enum Ansi {
+        static let reset = "\u{001B}[0m"
+        static let bold = "\u{001B}[1m"
+        static let dim = "\u{001B}[2m"
+        static let cyan = "\u{001B}[36m"
+        static let green = "\u{001B}[32m"
+        static let yellow = "\u{001B}[33m"
+    }
+
+    static var isInteractiveTTY: Bool {
+        isatty(STDIN_FILENO) == 1 && isatty(STDOUT_FILENO) == 1
+    }
+
+    private var supportsANSI: Bool {
+        guard Self.isInteractiveTTY else {
+            return false
+        }
+        let term = ProcessInfo.processInfo.environment["TERM"]?.lowercased() ?? ""
+        return !term.isEmpty && term != "dumb"
+    }
+
+    func hero(title: String) {
+        let bar = "============================================================"
+        let art = #"""
+                      ___
+                     <__ \
+                       | o|
+                       | o|  ______
+                       | o|  / O /
+                        \ o\/ O /
+                         \____/
+        """#
+        Swift.print(styled("\(bar)\n\(art)\n\(title)\n\(bar)", color: Ansi.cyan, bold: true))
+    }
+
+    func step(_ number: Int, of total: Int, title: String) {
+        Swift.print(styled("[Step \(number)/\(total)] \(title)", color: Ansi.cyan, bold: true))
+    }
+
+    func header(_ line: String) {
+        Swift.print(styled(line, bold: true))
+    }
+
+    func item(_ line: String) {
+        Swift.print("  • \(line)")
+    }
+
+    func note(_ line: String) {
+        Swift.print(styled(line, color: Ansi.dim))
+    }
+
+    func warn(_ line: String) {
+        Swift.print(styled("warning: \(line)", color: Ansi.yellow, bold: true))
+    }
+
+    func success(_ line: String) {
+        Swift.print(styled(line, color: Ansi.green, bold: true))
+    }
+
+    func blank() {
+        Swift.print("")
+    }
+
+    func choice(prompt: String, defaultValue: String, valid: Set<String>) throws -> String {
+        while true {
+            let input = try text(prompt: prompt, defaultValue: defaultValue).lowercased()
+            if valid.contains(input) {
+                return input
+            }
+            Swift.print("Please choose one of: \(valid.sorted().joined(separator: ", "))")
+        }
+    }
+
+    func text(prompt: String, defaultValue: String) throws -> String {
+        guard let raw = read(prompt: prompt) else {
+            throw ConfigWizardError.cancelled
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultValue : trimmed
+    }
+
+    func requiredText(_ prompt: String) throws -> String {
+        while true {
+            guard let raw = read(prompt: prompt) else {
+                throw ConfigWizardError.cancelled
+            }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+            Swift.print("Value cannot be empty.")
+        }
+    }
+
+    func requiredSecret(_ prompt: String) throws -> String {
+        while true {
+            guard let raw = readSecret(prompt: prompt) else {
+                throw ConfigWizardError.cancelled
+            }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+            Swift.print("Value cannot be empty.")
+        }
+    }
+
+    func confirm(_ prompt: String, defaultYes: Bool) throws -> Bool {
+        while true {
+            let raw = try text(prompt: prompt, defaultValue: defaultYes ? "y" : "n").lowercased()
+            switch raw {
+            case "y", "yes":
+                return true
+            case "n", "no":
+                return false
+            default:
+                Swift.print("Please answer y or n.")
+            }
+        }
+    }
+
+    private func styled(_ value: String, color: String? = nil, bold: Bool = false) -> String {
+        guard supportsANSI else {
+            return value
+        }
+        var prefix = ""
+        if bold {
+            prefix += Ansi.bold
+        }
+        if let color {
+            prefix += color
+        }
+        return "\(prefix)\(value)\(Ansi.reset)"
+    }
+
+    private func read(prompt: String) -> String? {
+        Swift.print(prompt, terminator: "")
+        fflush(stdout)
+        if let line = readLine() {
+            return line
+        }
+        return readLineFromTTY()
+    }
+
+    private func readSecret(prompt: String) -> String? {
+#if canImport(Darwin) || canImport(Glibc)
+        guard let raw = getpass(prompt) else {
+            return nil
+        }
+        return String(cString: raw)
+#else
+        return read(prompt: prompt)
+#endif
+    }
+
+    private func readLineFromTTY() -> String? {
+        guard let handle = FileHandle(forReadingAtPath: "/dev/tty") else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        var buffer = Data()
+        var sawNewline = false
+        while true {
+            guard let chunk = try? handle.read(upToCount: 1),
+                  !chunk.isEmpty
+            else {
+                break
+            }
+
+            let byte = chunk[chunk.startIndex]
+            if byte == 10 {
+                sawNewline = true
+                break
+            }
+            if byte == 13 {
+                continue
+            }
+            buffer.append(byte)
+        }
+
+        if !sawNewline && buffer.isEmpty {
+            return nil
+        }
+
+        return String(data: buffer, encoding: .utf8) ?? ""
+    }
+}
+
+private func normalizeRewriteMode(_ raw: String?) -> String? {
+    guard let raw else {
+        return nil
+    }
+    let mode = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch mode {
+    case "literal", "smart":
+        return mode
+    default:
+        return nil
+    }
+}
+
 private struct Arguments {
     enum Mode {
         case simulate(String)
@@ -301,6 +883,7 @@ private struct Arguments {
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
         case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?)
         case captureShortcut
+        case configWizard(configDir: String, defaultShortcut: String, defaultRewriteMode: String, defaultOpenRouterModel: String)
         case invalid
     }
 
@@ -311,6 +894,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --capture-shortcut
+      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode smart] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct]
     """
 
     let mode: Mode
@@ -374,6 +958,23 @@ private struct Arguments {
 
         if rawArgs.contains("--capture-shortcut") {
             return Arguments(mode: .captureShortcut)
+        }
+
+        if rawArgs.contains("--config-wizard") {
+            guard let configDir = value(after: "--config-dir", in: rawArgs) else {
+                return Arguments(mode: .invalid)
+            }
+            let defaultShortcut = value(after: "--default-shortcut", in: rawArgs) ?? "ctrl+shift+space"
+            let defaultRewriteMode = value(after: "--default-rewrite-mode", in: rawArgs) ?? "smart"
+            let defaultOpenRouterModel = value(after: "--default-openrouter-model", in: rawArgs) ?? "mistralai/mistral-small-3.1-24b-instruct"
+            return Arguments(
+                mode: .configWizard(
+                    configDir: configDir,
+                    defaultShortcut: defaultShortcut,
+                    defaultRewriteMode: defaultRewriteMode,
+                    defaultOpenRouterModel: defaultOpenRouterModel
+                )
+            )
         }
 
         return Arguments(mode: .invalid)
@@ -597,6 +1198,16 @@ private final class LiveCaptureMeter {
 
         return sqrt(energy / Double(samples.count))
     }
+}
+
+private func terminateProcess(_ code: Int32) -> Never {
+#if canImport(Darwin)
+    Darwin.exit(code)
+#elseif canImport(Glibc)
+    Glibc.exit(code)
+#else
+    fatalError("unsupported platform exit for code \(code)")
+#endif
 }
 
 private func emit(_ line: String) {

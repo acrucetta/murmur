@@ -138,6 +138,7 @@ murmur doctor
 
 Shortcut config:
 ```bash
+murmur config                 # guided wizard (shortcut + rewrite + model + API key)
 murmur shortcut get
 murmur shortcut set
 murmur shortcut set "ctrl+option+space"

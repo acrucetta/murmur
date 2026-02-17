@@ -29,8 +29,8 @@ Usage:
   ${COMMAND_NAME} history [lines]
   ${COMMAND_NAME} history-path
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config get
-  ${COMMAND_NAME} config set [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
+  ${COMMAND_NAME} config [wizard|get|set]
+  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} shortcut get
   ${COMMAND_NAME} shortcut set [combo]
   ${COMMAND_NAME} shortcut reset
@@ -316,63 +316,105 @@ shortcut_get() {
   echo "source=$(shortcut_source)"
 }
 
-shortcut_set() {
-  local shortcut="${1:-}"
-  shortcut="$(trim "$shortcut")"
-  if [[ -z "$shortcut" ]]; then
-    if [[ ! -t 0 || ! -t 1 ]]; then
-      echo "shortcut value is required in non-interactive mode" >&2
-      return 2
-    fi
-
-    ensure_capture_build
-    local capture_output
-    if ! capture_output="$("$ROOT_DIR/.build/debug/DictationPreviewCLI" --capture-shortcut < /dev/tty)"; then
-      echo "shortcut capture failed" >&2
-      return 1
-    fi
-
-    local captured
-    captured="$(printf '%s\n' "$capture_output" | sed -n 's/^shortcut=//p' | head -n 1)"
-    captured="$(trim "$captured")"
-    if [[ -z "$captured" ]]; then
-      echo "$capture_output" >&2
-      echo "shortcut capture did not return a valid combo" >&2
-      return 1
-    fi
-
-    shortcut="$captured"
-    echo "captured shortcut: $shortcut"
-    drain_tty_input
-    if ! read -r -p "Use this shortcut? [y/N] " confirm < /dev/tty; then
-      echo "shortcut update cancelled"
-      return 1
-    fi
-    case "${confirm:-}" in
-      y|Y|yes|YES)
-        ;;
-      *)
-        echo "shortcut update cancelled"
-        return 1
-        ;;
-    esac
-  fi
-
-  mkdir -p "$CONFIG_DIR"
-  printf '%s\n' "$shortcut" >"$SHORTCUT_FILE"
-  echo "shortcut set to $shortcut"
-  echo "config_file=$SHORTCUT_FILE"
+show_restart_note_if_running() {
   if is_running; then
-    echo "note: restart murmur for shortcut changes to apply"
+    echo "note: restart murmur for config changes to apply"
   fi
 }
 
-shortcut_reset() {
-  rm -f "$SHORTCUT_FILE"
-  echo "shortcut reset to default ($DEFAULT_SHORTCUT)"
-  if is_running; then
-    echo "note: restart murmur for shortcut changes to apply"
+ensure_interactive_tty() {
+  if [[ -t 0 && -t 1 ]]; then
+    return 0
   fi
+  echo "interactive config requires a TTY. use '${COMMAND_NAME} config set --mode/--shortcut/...' in non-interactive contexts." >&2
+  return 2
+}
+
+write_shortcut_value() {
+  local shortcut="$1"
+  write_config_value "$SHORTCUT_FILE" "$shortcut"
+}
+
+clear_shortcut_value() {
+  rm -f "$SHORTCUT_FILE"
+}
+
+capture_shortcut_value() {
+  ensure_capture_build
+
+  local capture_output
+  if ! capture_output="$("$ROOT_DIR/.build/debug/DictationPreviewCLI" --capture-shortcut < /dev/tty)"; then
+    echo "shortcut capture failed" >&2
+    return 1
+  fi
+
+  local captured
+  captured="$(printf '%s\n' "$capture_output" | sed -n 's/^shortcut=//p' | head -n 1)"
+  captured="$(trim "$captured")"
+  if [[ -z "$captured" ]]; then
+    echo "$capture_output" >&2
+    echo "shortcut capture did not return a valid combo" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$captured"
+}
+
+confirm_yes_no() {
+  local prompt="$1"
+  local default_no="${2:-yes}"
+  local input
+  drain_tty_input
+  if ! read -r -p "$prompt" input < /dev/tty; then
+    return 1
+  fi
+  input="$(trim "$input")"
+  case "${input,,}" in
+    y|yes)
+      return 0
+      ;;
+    n|no)
+      return 1
+      ;;
+    "")
+      if [[ "$default_no" == "yes" ]]; then
+        return 1
+      fi
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+shortcut_set() {
+  local shortcut="${1:-}"
+  shortcut="$(trim "$shortcut")"
+
+  if [[ -z "$shortcut" ]]; then
+    if ! ensure_interactive_tty; then
+      echo "shortcut value is required in non-interactive mode" >&2
+      return 2
+    fi
+    shortcut="$(capture_shortcut_value)"
+    echo "captured shortcut: $shortcut"
+    if ! confirm_yes_no "Use this shortcut? [y/N] " "yes"; then
+      echo "shortcut update cancelled"
+      return 1
+    fi
+  fi
+
+  write_shortcut_value "$shortcut"
+  echo "shortcut set to $shortcut"
+  echo "config_file=$SHORTCUT_FILE"
+  show_restart_note_if_running
+}
+
+shortcut_reset() {
+  clear_shortcut_value
+  echo "shortcut reset to default ($DEFAULT_SHORTCUT)"
+  show_restart_note_if_running
 }
 
 shortcut_command() {
@@ -401,11 +443,14 @@ shortcut_command() {
 
 config_usage() {
   cat <<USAGE
-usage: ${COMMAND_NAME} config [get|set]
+usage: ${COMMAND_NAME} config [wizard|get|set]
 
 examples:
   ${COMMAND_NAME} config
+  ${COMMAND_NAME} config wizard
   ${COMMAND_NAME} config get
+  ${COMMAND_NAME} config set --shortcut ctrl+option+space
+  ${COMMAND_NAME} config set --reset-shortcut
   ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
   ${COMMAND_NAME} config set --api-key sk-or-...
   ${COMMAND_NAME} config set --clear-api-key
@@ -421,90 +466,35 @@ config_get() {
   echo "openrouter_api_key_source=$(openrouter_api_key_source)"
 }
 
+run_swift_config_wizard() {
+  local cli_bin="$ROOT_DIR/.build/debug/DictationPreviewCLI"
+  if [[ ! -x "$cli_bin" ]]; then
+    ensure_capture_build
+  fi
+  "$cli_bin" \
+    --config-wizard \
+    --config-dir "$CONFIG_DIR" \
+    --default-shortcut "$DEFAULT_SHORTCUT" \
+    --default-rewrite-mode "$DEFAULT_REWRITE_MODE" \
+    --default-openrouter-model "$DEFAULT_OPENROUTER_MODEL"
+}
+
 config_set_interactive() {
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    echo "interactive config requires a TTY. use '${COMMAND_NAME} config set --mode ...' in non-interactive contexts." >&2
+  if ! ensure_interactive_tty; then
     return 2
   fi
-
-  local current_mode current_model key_source mode_input selected_mode model_input key_input keep_key
-  current_mode="$(resolve_rewrite_mode)"
-  current_model="$(resolve_openrouter_model)"
-  key_source="$(openrouter_api_key_source)"
-
-  echo "Murmur config"
-  echo "current rewrite mode: $current_mode"
-  echo "1) literal"
-  echo "2) smart (OpenRouter optional)"
-  if ! read -r -p "choose mode [1/2] (enter keeps '$current_mode'): " mode_input < /dev/tty; then
-    echo "config update cancelled"
-    return 1
-  fi
-  mode_input="$(trim "$mode_input")"
-  case "${mode_input,,}" in
-    "")
-      selected_mode="$current_mode"
-      ;;
-    1|literal)
-      selected_mode="literal"
-      ;;
-    2|smart)
-      selected_mode="smart"
-      ;;
-    *)
-      echo "invalid mode choice: $mode_input" >&2
-      return 2
-      ;;
-  esac
-  write_config_value "$REWRITE_MODE_FILE" "$selected_mode"
-
-  if [[ "$selected_mode" == "smart" ]]; then
-    if ! read -r -p "model id (enter keeps '$current_model'): " model_input < /dev/tty; then
-      echo "config update cancelled"
-      return 1
-    fi
-    model_input="$(trim "$model_input")"
-    if [[ -n "$model_input" ]]; then
-      write_config_value "$OPENROUTER_MODEL_FILE" "$model_input"
-    elif [[ ! -f "$OPENROUTER_MODEL_FILE" ]]; then
-      write_config_value "$OPENROUTER_MODEL_FILE" "$current_model"
-    fi
-
-    echo "api key source: $key_source"
-    if ! read -r -s -p "OpenRouter API key (enter keeps current, '-' clears stored key): " key_input < /dev/tty; then
-      echo
-      echo "config update cancelled"
-      return 1
-    fi
-    echo
-    key_input="$(trim "$key_input")"
-    if [[ "$key_input" == "-" ]]; then
-      rm -f "$OPENROUTER_API_KEY_FILE"
-    elif [[ -n "$key_input" ]]; then
-      write_secret_config_value "$OPENROUTER_API_KEY_FILE" "$key_input"
-    fi
-  else
-    if [[ "$(openrouter_key_present)" == "yes" ]]; then
-      if read -r -p "keep stored API key for future smart mode? [Y/n] " keep_key < /dev/tty; then
-        keep_key="$(trim "$keep_key")"
-        case "${keep_key,,}" in
-          n|no)
-            rm -f "$OPENROUTER_API_KEY_FILE"
-            ;;
-        esac
-      fi
-    fi
+  if ! run_swift_config_wizard; then
+    return $?
   fi
 
   echo "config updated:"
   config_get
-  if is_running; then
-    echo "note: restart murmur for config changes to apply"
-  fi
+  shortcut_get
+  show_restart_note_if_running
 }
 
 config_set_non_interactive() {
-  local mode="" model="" api_key="" clear_api_key=0
+  local mode="" model="" api_key="" shortcut="" clear_api_key=0 reset_shortcut=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -532,6 +522,18 @@ config_set_non_interactive() {
         api_key="$2"
         shift 2
         ;;
+      --shortcut)
+        if [[ $# -lt 2 ]]; then
+          echo "--shortcut requires a value" >&2
+          return 2
+        fi
+        shortcut="$2"
+        shift 2
+        ;;
+      --reset-shortcut)
+        reset_shortcut=1
+        shift
+        ;;
       --clear-api-key)
         clear_api_key=1
         shift
@@ -548,7 +550,12 @@ config_set_non_interactive() {
     esac
   done
 
-  if [[ -z "$mode" && -z "$model" && -z "$api_key" && "$clear_api_key" -eq 0 ]]; then
+  if [[ "$reset_shortcut" -eq 1 && -n "$(trim "$shortcut")" ]]; then
+    echo "--shortcut and --reset-shortcut cannot be used together" >&2
+    return 2
+  fi
+
+  if [[ -z "$mode" && -z "$model" && -z "$api_key" && -z "$shortcut" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 ]]; then
     config_set_interactive
     return $?
   fi
@@ -571,26 +578,42 @@ config_set_non_interactive() {
     write_secret_config_value "$OPENROUTER_API_KEY_FILE" "$api_key"
   fi
 
+  shortcut="$(trim "$shortcut")"
+  if [[ -n "$shortcut" ]]; then
+    write_shortcut_value "$shortcut"
+  fi
+
+  if [[ "$reset_shortcut" -eq 1 ]]; then
+    clear_shortcut_value
+  fi
+
   if [[ "$clear_api_key" -eq 1 ]]; then
     rm -f "$OPENROUTER_API_KEY_FILE"
   fi
 
   echo "config updated:"
   config_get
-  if is_running; then
-    echo "note: restart murmur for config changes to apply"
-  fi
+  shortcut_get
+  show_restart_note_if_running
 }
 
 config_command() {
-  local action="${1:-set}"
+  local action="${1:-wizard}"
   if [[ $# -gt 0 ]]; then
     shift
+  fi
+
+  if [[ "$action" == --* ]]; then
+    config_set_non_interactive "$action" "$@"
+    return $?
   fi
 
   case "$action" in
     get)
       config_get
+      ;;
+    wizard|quick)
+      config_set_interactive
       ;;
     set)
       config_set_non_interactive "$@"

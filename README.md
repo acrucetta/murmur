@@ -128,10 +128,24 @@ Configure rewrite mode from CLI (interactive):
 murmur config
 ```
 
-This opens a small prompt flow where you can:
+This opens a guided config wizard where you can:
+- keep/capture/type/reset the primary shortcut
 - choose `literal` or `smart`
 - set model id (smart mode)
-- enter/replace/clear your OpenRouter API key (smart mode)
+- enter/replace/clear your OpenRouter API key
+- review all changes before apply
+
+If shortcut capture cannot complete (for example permissions or terminal-host issues), the wizard offers immediate manual-entry fallback.
+
+Script-friendly updates are still supported:
+
+```bash
+murmur config set --shortcut "ctrl+option+space"
+murmur config set --reset-shortcut
+murmur config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+murmur config set --api-key "<token>"
+murmur config set --clear-api-key
+```
 
 ## Configure Shortcut
 
@@ -218,7 +232,8 @@ murmur run
 murmur run --rewrite-mode literal|smart [--openrouter-model <id>]
 murmur setup [--python <python3>] [--skip-model-download] [--global]
 murmur start|stop|restart|status|logs
-murmur config [get|set ...]
+murmur config [wizard|get|set ...]
+murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
 murmur shortcut get|set [combo]|reset
 murmur history [lines]
 murmur history-path
