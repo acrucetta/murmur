@@ -1,8 +1,8 @@
-![Jazz Murmur AI art](docs/assets/jazz-murmur-ai.svg)
-
 # Murmur 🎙️✨
 
 Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moonshine-ai/moonshine?tab=readme-ov-file).
+
+![Jazz Murmur AI art](docs/assets/jazz-murmur-ai.svg)
 
 Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. Default runtime path is local-only; optional smart rewrite can use OpenRouter.
 
