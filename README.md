@@ -49,21 +49,12 @@ This does everything needed to run:
 murmur run
 ```
 
-Optional local-only setup (no global command):
-
-```bash
-./murmur setup
-./murmur run
-```
-
 ### 4) Development verification (optional)
 
 ```bash
 swift build
 swift test
 ```
-
-If you used local-only setup, use `./murmur ...` for commands shown below.
 
 ### Installer Notes
 
@@ -151,56 +142,6 @@ murmur config set --api-key "<token>"
 murmur config set --clear-api-key
 ```
 
-## Configure Shortcut
-
-Show current shortcut:
-
-```bash
-murmur shortcut get
-```
-
-Set a new primary shortcut:
-
-```bash
-murmur shortcut set
-```
-
-Or set it directly by identifier:
-
-```bash
-murmur shortcut set "ctrl+option+space"
-```
-
-Reset to default:
-
-```bash
-murmur shortcut reset
-```
-
-Notes:
-- Primary default: `ctrl+shift+space`
-- Backup remains enabled: `ctrl+shift+d`
-- `murmur shortcut set` starts a key listener and prompts for confirmation.
-- Restart Murmur after changing shortcut.
-
-## Transcript History
-
-View where transcripts are stored:
-
-```bash
-murmur history-path
-```
-
-Show recent transcript lines:
-
-```bash
-murmur history
-murmur history 200
-```
-
-Default location:
-- `~/Library/Application Support/Murmur/transcriptions/`
-
 ## How It Works
 
 1. Global hotkey press starts local audio capture.
@@ -234,13 +175,9 @@ User Hotkey
 ```bash
 murmur run
 murmur run --rewrite-mode literal|smart [--openrouter-model <id>]
-murmur setup [--python <python3>] [--skip-model-download] [--global]
 murmur start|stop|restart|status|logs
 murmur config [wizard|get|set ...]
 murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
-murmur shortcut get|set [combo]|reset
-murmur history [lines]
-murmur history-path
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
 murmur uninstall
