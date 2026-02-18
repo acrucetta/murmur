@@ -1,78 +1,30 @@
 # Murmur
 
-Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moonshine-ai/moonshine?tab=readme-ov-file).
+Local-first macOS dictation with push-to-talk, local ASR (Moonshine), and reliable text insertion.
 
 ![Murmur AI art](docs/assets/jazz-murmur-ai.svg)
 
-Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. Default runtime path is local-only; optional smart rewrite can use OpenRouter.
+`Murmur` is designed to work immediately without cloud setup:
+- Default rewrite mode is `literal` (no LLM token required).
+- Optional `smart` rewrite uses OpenRouter when configured.
+- Runtime path stays local-first and falls back safely on failure.
 
-```text
-   ( speak )   ──▶   🫧 Murmur   ──▶   ( text appears )
-```
-
-## Features
-
-- Global push-to-talk hotkey with configurable primary shortcut.
-- Local ASR via Moonshine (`moonshine_voice` primary, `moonshine_onnx` fallback).
-- Cross-app insertion (Accessibility direct write + clipboard fallback).
-- Disfluency-aware cleanup (basic stutter/repair handling).
-- Optional smart rewrite mode via OpenRouter (safe fallback on transport/API failure).
-- Recording start/stop feedback cues (sound + haptic in menu bar app runtime).
-- Menu bar runtime + simple CLI launcher.
-- Local transcript history on disk.
-
-## Install
-
-### 1) Clone
+## Quick Start
 
 ```bash
 git clone git@github.com:acrucetta/murmur.git
 cd murmur
-```
-
-### 2) One-command install (recommended)
-
-```bash
 ./murmur install
-```
-
-This does everything needed to run:
-- creates/reuses `.venv`
-- installs Moonshine Python dependencies
-- downloads the English Moonshine model
-- builds the Murmur app binary
-- installs global `murmur` command
-
-### 3) Run
-
-```bash
 murmur run
 ```
 
-### 4) Development verification (optional)
+Usage flow:
+1. Focus any text field.
+2. Hold the hotkey (`ctrl+shift+space` by default).
+3. Speak, then release.
+4. Murmur inserts cleaned text.
 
-```bash
-swift build
-swift test
-```
-
-### Installer Notes
-
-- `./murmur install` is safe to rerun. It reuses `.venv` and only refreshes what is needed.
-- First install needs internet access for package/model download.
-- If your Python executable is non-standard, use `./murmur install --python /absolute/path/to/python3`.
-- If `murmur` is not found after install, add `~/.local/bin` to `PATH` or run `./murmur install --link-only`.
-- On first launch, macOS may ask for `Microphone`, `Accessibility`, and `Input Monitoring` permissions.
-
-## Quick Start
-
-Run in foreground:
-
-```bash
-murmur run
-```
-
-Run in background:
+Background mode:
 
 ```bash
 murmur start
@@ -80,22 +32,50 @@ murmur logs
 murmur stop
 ```
 
-When smart rewrite is used, logs include per-turn and session usage counters:
+## Requirements
 
-```text
-ts=... level=info metric smart_rewrite_usage model=... turn_prompt_tokens=... turn_completion_tokens=... turn_total_tokens=... turn_cost_usd=... session_turns=... session_total_tokens=... session_cost_usd=...
+- macOS 13+
+- Swift toolchain (Xcode Command Line Tools is enough)
+- Python 3 (for Moonshine runtime setup)
+- Internet access on first install (dependencies + model download)
+
+## Installation
+
+Recommended:
+
+```bash
+./murmur install
 ```
+
+This installer:
+- creates/reuses `.venv`
+- installs Moonshine Python dependencies
+- downloads the English Moonshine model
+- builds `MurmurMenuBarApp`
+- installs global `murmur` command
+
+Useful options:
+
+```bash
+./murmur install --python /absolute/path/to/python3
+./murmur install --skip-model-download
+./murmur install --link-only
+```
+
+If `murmur` is not in `PATH` after install, add `~/.local/bin` to `PATH`.
 
 ## Rewrite Modes
 
 `Murmur` supports two rewrite modes:
 
 - `literal` (default): deterministic cleanup only, no LLM rewrite.
-- `smart`: deterministic cleanup + optional OpenRouter polish if API key is configured.
+- `smart`: deterministic cleanup + optional OpenRouter rewrite.
 
-By default, Murmur runs in `literal` mode so it works immediately without any LLM API token.
+Default behavior:
+- If you do nothing, Murmur runs in `literal` mode.
+- No API key is required for the default path.
 
-Enable smart mode with OpenRouter:
+Enable smart mode:
 
 ```bash
 export OPENROUTER_API_KEY="<your-token>"
@@ -104,34 +84,22 @@ export MURMUR_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
 murmur run
 ```
 
-Switch to literal mode:
-
-```bash
-export MURMUR_REWRITE_MODE="literal"
-murmur run
-```
-
-One-off override (without changing env):
+One-off mode override:
 
 ```bash
 murmur run --rewrite-mode literal
 murmur run --rewrite-mode smart --openrouter-model mistralai/mistral-small-3.1-24b-instruct
 ```
 
-Configure from CLI (interactive):
+## Configuration
+
+Interactive wizard:
 
 ```bash
 murmur config
 ```
 
-This opens a guided config wizard where you can:
-- keep/reset the primary shortcut, pick a preset, or enter a custom combo
-- choose `literal` or `smart`
-- choose an OpenRouter model from a curated picker (or enter a custom model id)
-- enter/replace/clear your OpenRouter API key
-- review all changes before apply
-
-Script-friendly updates are still supported:
+Scriptable updates:
 
 ```bash
 murmur config set --shortcut "ctrl+option+space"
@@ -141,41 +109,43 @@ murmur config set --api-key "<token>"
 murmur config set --clear-api-key
 ```
 
-## How It Works
+Config precedence:
+1. CLI flags (`--rewrite-mode`, `--openrouter-model`, etc.)
+2. Environment variables (`MURMUR_*`, `OPENROUTER_API_KEY`)
+3. Config files in `~/Library/Application Support/Murmur`
+4. Built-in defaults (`literal` mode, default model id)
 
-1. Global hotkey press starts local audio capture.
-2. Audio frames stream to Moonshine.
-3. On release, ASR finalizes once.
-4. Text is post-processed (cleanup, punctuation, casing).
-5. Optional smart rewrite runs (OpenRouter) and falls back to local text on API/transport error.
-6. Insert into focused app field.
-7. Result + transcript line is logged locally.
+## Logging and Grep
 
-## Architecture
+Background log file:
+
+```bash
+/tmp/murmur-menubar.log
+```
+
+Log format is structured and grep-friendly:
 
 ```text
-User Hotkey
-  -> HotkeyController
-  -> SessionOrchestrator (state machine)
-     -> PermissionManager
-     -> AudioCapture
-     -> ASREngine (Moonshine Python bridge)
-     -> TextPostProcessorV2
-     -> Optional OpenRouterTranscriptRewriter (smart mode only)
-     -> FocusedFieldWriter
-        -> Accessibility direct
-        -> Clipboard paste fallback
-     -> TranscriptHistoryStore (local files)
-     -> StatusUI (menu bar)
+ts=2026-02-18T12:34:56.789Z level=info metric release_to_insert_ms=183
+ts=2026-02-18T12:34:57.111Z level=info metric smart_rewrite_usage model=... turn_total_tokens=...
+```
+
+Common filters:
+
+```bash
+rg "metric release_to_(final|insert)_ms=" /tmp/murmur-menubar.log
+rg "metric smart_rewrite_" /tmp/murmur-menubar.log
+rg "level=info warning=" /tmp/murmur-menubar.log
 ```
 
 ## CLI Reference
 
 ```bash
-murmur run
-murmur run --rewrite-mode literal|smart [--openrouter-model <id>]
-murmur start|stop|logs
-murmur config [set ...]
+murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
+murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
+murmur stop
+murmur logs
+murmur config
 murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
@@ -189,18 +159,52 @@ murmur --h
 murmur config --h
 ```
 
+## Development
+
+Build and test:
+
+```bash
+swift build
+swift test
+```
+
+Useful code paths:
+- Core orchestrator: `Sources/DictationAppCore/Core/SessionOrchestrator.swift`
+- Rewrite module: `Sources/DictationAppCore/Modules/Rewrite/`
+- Menu bar app entry: `Sources/MurmurMenuBarApp/main.swift`
+- Launcher script: `scripts/murmur`
+
 ## Troubleshooting
 
-- If hotkey does nothing, verify macOS permissions for the launching app:
-  - Microphone
-  - Accessibility
-  - Input Monitoring
-- If ASR fails, run `murmur doctor` and verify `python` + script paths.
-- If smart rewrite is enabled, run `murmur doctor` to confirm rewrite mode/model and API key presence.
-- If insertion fails in secure fields, expected behavior is safe failure.
+- Hotkey does nothing:
+  - Verify `Microphone`, `Accessibility`, and `Input Monitoring` permissions.
+- ASR fails:
+  - Run `murmur doctor`.
+  - Confirm Python path + Moonshine script resolution.
+- Smart rewrite not applying:
+  - Confirm mode is `smart`.
+  - Confirm API key is present (`murmur doctor` shows key presence/source).
+- Insertion fails in secure fields:
+  - This is expected in protected input contexts.
 
-## Development Notes
+## Architecture
 
-- Product spec: `docs/product-specs/macos-local-dictation-mvp.md`
-- Moonshine setup details: `docs/product-specs/moonshine-local-setup.md`
-- Agent docs index: `docs/index.md`
+```text
+User Hotkey
+  -> HotkeyController
+  -> SessionOrchestrator
+     -> PermissionManager
+     -> AudioCapture
+     -> ASREngine (Moonshine bridge)
+     -> TextPostProcessorV2
+     -> Optional OpenRouterTranscriptRewriter (smart mode)
+     -> FocusedFieldWriter (Accessibility direct + clipboard fallback)
+     -> TranscriptHistoryStore (local files)
+     -> StatusUI (menu bar)
+```
+
+## Docs
+
+- Docs index: `docs/index.md`
+- Product specs: `docs/product-specs/`
+- Active/completed plans: `docs/exec-plans/`
