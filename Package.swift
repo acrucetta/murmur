@@ -21,6 +21,12 @@ let package = Package(
             targets: ["MurmurMenuBarApp"]
         ),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/migueldeicaza/TermKit.git",
+            revision: "2cdfc96f9c524251ae1f517a440f28150182b7c2"
+        ),
+    ],
     targets: [
         .target(
             name: "DictationAppCore",
@@ -31,7 +37,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "DictationPreviewCLI",
-            dependencies: ["DictationAppCore"],
+            dependencies: [
+                "DictationAppCore",
+                "TermKit",
+            ],
             path: "Sources/DictationPreviewCLI"
         ),
         .executableTarget(

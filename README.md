@@ -1,8 +1,8 @@
-# Murmur 🎙️✨
+# Murmur
 
 Local-first macOS dictation powered by [Moonshine Voice](https://github.com/moonshine-ai/moonshine?tab=readme-ov-file).
 
-![Jazz Murmur AI art](docs/assets/jazz-murmur-ai.svg)
+![Murmur AI art](docs/assets/jazz-murmur-ai.svg)
 
 Hold a global hotkey, speak, release, and Murmur inserts cleaned text into the focused field. Default runtime path is local-only; optional smart rewrite can use OpenRouter.
 
@@ -90,6 +90,12 @@ murmur logs
 murmur stop
 ```
 
+When smart rewrite is used, logs include per-turn and session usage counters:
+
+```text
+metric smart_rewrite_usage model=... turn_prompt_tokens=... turn_completion_tokens=... turn_total_tokens=... turn_cost_usd=... session_turns=... session_total_tokens=... session_cost_usd=...
+```
+
 ## Rewrite Modes
 
 `Murmur` supports two rewrite modes:
@@ -122,20 +128,18 @@ murmur run --rewrite-mode literal
 murmur run --rewrite-mode smart --openrouter-model mistralai/mistral-small-3.1-24b-instruct
 ```
 
-Configure rewrite mode from CLI (interactive):
+Configure from CLI (interactive):
 
 ```bash
 murmur config
 ```
 
 This opens a guided config wizard where you can:
-- keep/capture/type/reset the primary shortcut
+- keep/reset the primary shortcut, pick a preset, or enter a custom combo
 - choose `literal` or `smart`
-- set model id (smart mode)
+- choose an OpenRouter model from a curated picker (or enter a custom model id)
 - enter/replace/clear your OpenRouter API key
 - review all changes before apply
-
-If shortcut capture cannot complete (for example permissions or terminal-host issues), the wizard offers immediate manual-entry fallback.
 
 Script-friendly updates are still supported:
 
@@ -240,6 +244,13 @@ murmur history-path
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
 murmur uninstall
+```
+
+Help:
+
+```bash
+murmur --h
+murmur config --h
 ```
 
 ## Troubleshooting

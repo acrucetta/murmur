@@ -38,6 +38,12 @@ Usage:
   ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
   ${COMMAND_NAME} uninstall
 
+Interactive config:
+  ${COMMAND_NAME} config
+    - terminal TUI with curated model picker + custom model
+    - hotkey flow: keep/reset/preset/custom
+    - API key flow: set/replace/clear
+
 Environment overrides:
   MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
   MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
@@ -447,6 +453,7 @@ usage: ${COMMAND_NAME} config [wizard|get|set]
 
 examples:
   ${COMMAND_NAME} config
+    # opens interactive TUI with model picker + hotkey presets/custom + API key actions
   ${COMMAND_NAME} config wizard
   ${COMMAND_NAME} config get
   ${COMMAND_NAME} config set --shortcut ctrl+option+space
@@ -538,7 +545,7 @@ config_set_non_interactive() {
         clear_api_key=1
         shift
         ;;
-      -h|--help)
+      -h|--h|--help)
         config_usage
         return 0
         ;;
@@ -618,7 +625,7 @@ config_command() {
     set)
       config_set_non_interactive "$@"
       ;;
-    -h|--help|help)
+    -h|--h|--help|help)
       config_usage
       ;;
     *)
@@ -1065,7 +1072,7 @@ install)
 uninstall)
   uninstall_cli
   ;;
-help|-h|--help)
+help|-h|--h|--help)
   usage
   ;;
 *)

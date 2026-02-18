@@ -33,9 +33,9 @@ CLI flags:
 Interactive CLI setup:
 
 - `murmur config`
-  - configure primary shortcut (keep/capture/type/reset)
+  - configure primary shortcut (keep/reset, preset choices, custom entry)
   - choose rewrite mode (`literal` / `smart`)
-  - configure model id for smart mode
+  - choose model id for smart mode from a list (or custom entry)
   - prompt for OpenRouter API key (set/replace/clear)
   - review and confirm all changes before persist
 
