@@ -127,6 +127,8 @@ Log format is structured and grep-friendly:
 
 ```text
 ts=2026-02-18T12:34:56.789Z level=info metric release_to_insert_ms=183
+ts=2026-02-18T12:34:56.790Z level=info metric insert_text chars=24 preview="hello world from murmur"
+ts=2026-02-18T12:34:56.791Z level=info metric insert_result success=true method=accessibility_direct code=none
 ts=2026-02-18T12:34:57.111Z level=info metric smart_rewrite_usage model=... turn_total_tokens=...
 ```
 
@@ -134,6 +136,7 @@ Common filters:
 
 ```bash
 rg "metric release_to_(final|insert)_ms=" /tmp/murmur-menubar.log
+rg "metric insert_(text|result)" /tmp/murmur-menubar.log
 rg "metric smart_rewrite_" /tmp/murmur-menubar.log
 rg "level=info warning=" /tmp/murmur-menubar.log
 ```

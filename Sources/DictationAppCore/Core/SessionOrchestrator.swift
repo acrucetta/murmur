@@ -95,7 +95,9 @@ public final class SessionOrchestrator {
                     .rewrite(cleaned, context: rewriteContext)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let textToInsert = rewritten.flatMap { $0.isEmpty ? nil : $0 } ?? cleaned
+                logInsertTextPreview(textToInsert)
                 let insertResult = fieldWriter.insert(textToInsert)
+                logInsertResult(insertResult)
                 transcriptHistory.record(
                     .init(
                         timestamp: releaseTimestamp ?? now(),
@@ -169,6 +171,29 @@ public final class SessionOrchestrator {
         let elapsed = now().timeIntervalSince(releaseTimestamp)
         let milliseconds = max(0, Int((elapsed * 1000).rounded()))
         logger.log("release_to_insert_ms=\(milliseconds)")
+    }
+
+    private func logInsertTextPreview(_ text: String) {
+        let preview = escapedPreview(for: text, maxLength: 200)
+        logger.log("insert_text chars=\(text.count) preview=\"\(preview)\"")
+    }
+
+    private func logInsertResult(_ result: InsertResult) {
+        let code = result.error?.rawValue ?? "none"
+        logger.log("insert_result success=\(result.success) method=\(result.method.rawValue) code=\(code)")
+    }
+
+    private func escapedPreview(for text: String, maxLength: Int) -> String {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+
+        guard escaped.count > maxLength else {
+            return escaped
+        }
+        return String(escaped.prefix(maxLength)) + "..."
     }
 
     private func isErrorState(_ state: SessionState) -> Bool {

@@ -76,6 +76,8 @@ struct SessionOrchestratorTests {
         #expect(history.entries.first?.transcript == "Hello world.")
         #expect(history.entries.first?.insertResult.method == .accessibilityDirect)
         #expect(history.entries.first?.insertResult.success == true)
+        #expect(logger.messages.contains(where: { $0.hasPrefix("insert_text chars=12 preview=\"Hello world.\"") }))
+        #expect(logger.messages.contains("insert_result success=true method=accessibility_direct code=none"))
         #expect(logger.messages.contains("release_to_final_ms=300"))
         #expect(logger.messages.contains("release_to_insert_ms=600"))
         #expect(feedback.recordingStartCount == 1)
@@ -312,6 +314,30 @@ struct SessionOrchestratorTests {
         #expect(rewriter.lastContext?.frontmostAppBundleID == "com.apple.mail")
         #expect(rewriter.lastContext?.mode == "smart")
         #expect(writer.lastInsertedText == "Ship on Friday.")
+    }
+
+    @Test
+    func insertionFailureIsLoggedWithMethodAndCode() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "hello", confidence: 0.9)
+        let writer = FakeFieldWriter()
+        writer.nextResult = .init(success: false, method: .clipboardPaste, error: .insertionFailed)
+        let logger = LoggerSpy()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(logger.messages.contains("insert_result success=false method=clipboard_paste code=insertion_failed"))
     }
 }
 
