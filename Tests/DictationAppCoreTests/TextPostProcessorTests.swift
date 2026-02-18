@@ -97,4 +97,44 @@ struct TextPostProcessorTests {
 
         #expect(cleaned == "Meeting tomorrow is canceled.")
     }
+
+    @Test
+    func convertsSpokenExclamationMark() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("that is great exclamation mark")
+
+        #expect(cleaned == "That is great!")
+    }
+
+    @Test
+    func convertsSpokenQuestionMark() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("are you coming question mark")
+
+        #expect(cleaned == "Are you coming?")
+    }
+
+    @Test
+    func convertsSpokenAtSymbolForEmailLikeContext() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("send this to jane at sign example.com")
+
+        #expect(cleaned == "Send this to jane@example.com.")
+    }
+
+    @Test
+    func keepsSpacesAroundAtSymbolInAmbiguousContext() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("look at symbol this")
+
+        #expect(cleaned == "Look @ this.")
+    }
+
+    @Test
+    func convertsSpokenSymbolsInLiteralMode() {
+        let processor = TextPostProcessorV2(mode: .literal)
+        let cleaned = processor.clean("nice work exclamation mark")
+
+        #expect(cleaned == "Nice work!")
+    }
 }

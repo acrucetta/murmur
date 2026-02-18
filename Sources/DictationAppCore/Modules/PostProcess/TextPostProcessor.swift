@@ -21,6 +21,14 @@ public struct TextPostProcessorV2: TextPostProcessing {
 
     private static let sentenceBoundaryPunctuation: Set<Character> = [".", "!", "?"]
     private static let clauseBoundaryPunctuation: Set<Character> = [".", "!", "?", ",", ";", ":"]
+    private static let spokenSymbolMarkers: [([String], String)] = [
+        (["exclamation", "mark"], "!"),
+        (["exclamation", "point"], "!"),
+        (["question", "mark"], "?"),
+        (["question", "point"], "?"),
+        (["at", "sign"], "@"),
+        (["at", "symbol"], "@"),
+    ]
 
     public init(mode: Mode = .smart) {
         self.mode = mode
@@ -32,16 +40,17 @@ public struct TextPostProcessorV2: TextPostProcessing {
             return ""
         }
 
+        let tokens = normalizedWhitespace
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        let symbolAware = applySpokenSymbols(tokens)
+
         let processed: String
         switch mode {
         case .literal:
-            processed = normalizedWhitespace
+            processed = joinTokens(symbolAware)
         case .smart:
-            let tokens = normalizedWhitespace
-                .split(whereSeparator: \.isWhitespace)
-                .map(String.init)
-
-            let repaired = applyRepairMarkers(tokens)
+            let repaired = applyRepairMarkers(symbolAware)
             let deduped = collapseRepetitions(repaired)
             processed = joinTokens(deduped)
         }
@@ -54,6 +63,30 @@ public struct TextPostProcessorV2: TextPostProcessing {
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func applySpokenSymbols(_ originalTokens: [String]) -> [String] {
+        var tokens = originalTokens
+
+        for (marker, symbol) in Self.spokenSymbolMarkers {
+            tokens = replaceMarker(marker, with: symbol, in: tokens)
+        }
+
+        return tokens
+    }
+
+    private func replaceMarker(_ marker: [String], with replacement: String, in originalTokens: [String]) -> [String] {
+        var tokens = originalTokens
+
+        while let markerStart = firstMarkerIndex(tokens: tokens, marker: marker) {
+            let markerEnd = markerStart + marker.count
+            guard markerEnd <= tokens.count else {
+                break
+            }
+            tokens.replaceSubrange(markerStart..<markerEnd, with: [replacement])
+        }
+
+        return tokens
     }
 
     private func applyRepairMarkers(_ originalTokens: [String]) -> [String] {
@@ -196,12 +229,60 @@ public struct TextPostProcessorV2: TextPostProcessing {
     }
 
     private func joinTokens(_ tokens: [String]) -> String {
-        let joined = tokens.joined(separator: " ")
+        let atJoinedTokens = tightenAtSymbolTokens(tokens)
+        let joined = atJoinedTokens.joined(separator: " ")
         return joined.replacingOccurrences(
             of: "\\s+([,.;:!?])",
             with: "$1",
             options: .regularExpression
         )
+    }
+
+    private func tightenAtSymbolTokens(_ originalTokens: [String]) -> [String] {
+        var result: [String] = []
+        var index = 0
+
+        while index < originalTokens.count {
+            let current = originalTokens[index]
+            if current == "@",
+               let previous = result.last,
+               index + 1 < originalTokens.count
+            {
+                let next = originalTokens[index + 1]
+                if shouldJoinAroundAt(previous: previous, next: next) {
+                    result[result.count - 1] = previous + "@" + next
+                    index += 2
+                    continue
+                }
+            }
+
+            result.append(current)
+            index += 1
+        }
+
+        return result
+    }
+
+    private func shouldJoinAroundAt(previous: String, next: String) -> Bool {
+        isEmailLocalPart(previous) && isDomainLikeToken(next)
+    }
+
+    private func isEmailLocalPart(_ token: String) -> Bool {
+        let canonical = canonicalToken(token)
+        guard !canonical.isEmpty else {
+            return false
+        }
+
+        return canonical.range(of: "^[a-z0-9][a-z0-9._%+\\-]*$", options: .regularExpression) != nil
+    }
+
+    private func isDomainLikeToken(_ token: String) -> Bool {
+        let canonical = canonicalToken(token)
+        guard canonical.contains(".") else {
+            return false
+        }
+
+        return canonical.range(of: "^[a-z0-9][a-z0-9._\\-]*\\.[a-z0-9._\\-]+$", options: .regularExpression) != nil
     }
 
     private func finalizeSentence(_ text: String) -> String {

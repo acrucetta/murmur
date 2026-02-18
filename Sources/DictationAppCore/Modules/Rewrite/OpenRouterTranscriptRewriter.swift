@@ -105,6 +105,13 @@ public final class URLSessionOpenRouterTransport: OpenRouterTransporting {
 public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
     public typealias DateProvider = () -> Date
 
+    private static let contentStopWords: Set<String> = [
+        "a", "an", "am", "and", "are", "as", "at", "be", "been", "but", "by", "can", "could", "did",
+        "do", "does", "for", "had", "has", "have", "he", "her", "his", "i", "if", "in", "is", "it", "its",
+        "me", "my", "of", "on", "or", "our", "she", "should", "that", "the", "their", "them", "there",
+        "they", "this", "to", "was", "we", "were", "will", "with", "would", "you", "your",
+    ]
+
     private let config: OpenRouterTranscriptRewriterConfig
     private let transport: OpenRouterTransporting
     private let logger: Logging
@@ -170,6 +177,10 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
                 logger.log("smart_rewrite_empty")
                 return nil
             }
+            if let rejectionReason = rewriteRejectionReason(candidate: cleanedRewrite, original: trimmed) {
+                logger.log("smart_rewrite_rejected reason=\(rejectionReason)")
+                return nil
+            }
 
             logger.log("smart_rewrite_applied elapsed_ms=\(elapsedMs)")
             return cleanedRewrite
@@ -202,6 +213,8 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
                     "content": """
                     Rewrite dictated text for clarity and correctness while preserving meaning. \
                     Fix punctuation, casing, obvious transcription mistakes, and accent-related homophone errors using context hints. \
+                    Do not add explanations, refusals, policy text, or capability disclaimers. \
+                    If input is unclear, return a minimally edited version of the original transcript. \
                     Return only the rewritten text with no explanation.
                     """,
                 ],
@@ -253,5 +266,85 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
         }
 
         return nil
+    }
+
+    private func rewriteRejectionReason(candidate: String, original: String) -> String? {
+        if hasUnboundedExpansion(candidate: candidate, original: original) {
+            return "length_spike"
+        }
+
+        if hasLowContentOverlap(candidate: candidate, original: original) {
+            return "low_content_overlap"
+        }
+
+        return nil
+    }
+
+    private func hasUnboundedExpansion(candidate: String, original: String) -> Bool {
+        let originalTokens = canonicalTokens(from: original)
+        let candidateTokens = canonicalTokens(from: candidate)
+        guard !originalTokens.isEmpty, !candidateTokens.isEmpty else {
+            return false
+        }
+
+        if original.count <= 80, candidate.count >= 180 {
+            return true
+        }
+
+        let originalUnique = Set(originalTokens)
+        let candidateUnique = Set(candidateTokens)
+        guard !originalUnique.isEmpty else {
+            return false
+        }
+
+        let overlapCount = originalUnique.intersection(candidateUnique).count
+        let overlapRatio = Double(overlapCount) / Double(originalUnique.count)
+        let lengthRatio = Double(candidateTokens.count) / Double(max(1, originalTokens.count))
+
+        if originalUnique.count >= 3, overlapRatio < 0.34, lengthRatio >= 1.8 {
+            return true
+        }
+
+        if overlapRatio < 0.2, candidate.count > 240 {
+            return true
+        }
+
+        return false
+    }
+
+    private func hasLowContentOverlap(candidate: String, original: String) -> Bool {
+        let originalContent = contentTokens(from: original)
+        let candidateContent = contentTokens(from: candidate)
+        guard originalContent.count >= 2, !candidateContent.isEmpty else {
+            return false
+        }
+
+        let originalUnique = Set(originalContent)
+        guard originalUnique.count >= 2 else {
+            return false
+        }
+        let candidateUnique = Set(candidateContent)
+        let overlapCount = originalUnique.intersection(candidateUnique).count
+        let overlapRatio = Double(overlapCount) / Double(originalUnique.count)
+
+        return overlapRatio < 0.25
+    }
+
+    private func contentTokens(from text: String) -> [String] {
+        canonicalTokens(from: text).filter { !Self.contentStopWords.contains($0) }
+    }
+
+    private func canonicalTokens(from text: String) -> [String] {
+        text
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .map { token in
+                token.replacingOccurrences(
+                    of: "^[^a-z0-9']+|[^a-z0-9']+$",
+                    with: "",
+                    options: .regularExpression
+                )
+            }
+            .filter { !$0.isEmpty }
     }
 }

@@ -94,6 +94,90 @@ struct OpenRouterTranscriptRewriterTests {
         #expect(result == nil)
         #expect(transport.callCount == 0)
     }
+
+    @Test
+    func returnsNilWhenModelReturnsRefusalText() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"I'm sorry, but I can't assist with that request."}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "Are you joining the call?",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test
+    func returnsNilWhenRewriteIsOffTopicAndMuchLonger() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"I do not have access to the requested tool output, but I can provide a high-level explanation of what likely happened and suggest several alternative approaches for diagnosing the issue in detail."}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "Ship this tomorrow.",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test
+    func returnsNilWhenRewriteHasNoContentOverlap() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"Blue elephants dance nightly under distant stars."}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "Are you joining the call?",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == nil)
+    }
 }
 
 private final class OpenRouterTransportSpy: OpenRouterTransporting {
