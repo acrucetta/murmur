@@ -44,6 +44,7 @@ struct SessionOrchestratorTests {
         let history = TranscriptHistorySpy()
         let logger = LoggerSpy()
         let feedback = FeedbackSpy()
+        let mediaController = RecordingMediaSpy()
 
         let orchestrator = SessionOrchestrator(
             permissionManager: permissions,
@@ -53,6 +54,7 @@ struct SessionOrchestratorTests {
             fieldWriter: writer,
             statusUI: StatusUISpy(),
             feedback: feedback,
+            recordingMediaController: mediaController,
             transcriptHistory: history,
             logger: logger,
             now: ClockSequence([
@@ -82,6 +84,8 @@ struct SessionOrchestratorTests {
         #expect(logger.messages.contains("release_to_insert_ms=600"))
         #expect(feedback.recordingStartCount == 1)
         #expect(feedback.recordingStopCount == 1)
+        #expect(mediaController.pauseCallCount == 1)
+        #expect(mediaController.resumeCallCount == 1)
         #expect(orchestrator.state == .idle)
     }
 
@@ -256,6 +260,7 @@ struct SessionOrchestratorTests {
     @Test
     func recordingFeedbackDoesNotFireWhenPermissionsDenied() {
         let feedback = FeedbackSpy()
+        let mediaController = RecordingMediaSpy()
 
         let orchestrator = SessionOrchestrator(
             permissionManager: FakePermissionManager(
@@ -271,6 +276,7 @@ struct SessionOrchestratorTests {
             fieldWriter: FakeFieldWriter(),
             statusUI: StatusUISpy(),
             feedback: feedback,
+            recordingMediaController: mediaController,
             logger: NoopLogger()
         )
 
@@ -278,6 +284,8 @@ struct SessionOrchestratorTests {
 
         #expect(feedback.recordingStartCount == 0)
         #expect(feedback.recordingStopCount == 0)
+        #expect(mediaController.pauseCallCount == 0)
+        #expect(mediaController.resumeCallCount == 0)
     }
 
     @Test

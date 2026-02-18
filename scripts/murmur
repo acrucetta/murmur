@@ -11,21 +11,23 @@ SHORTCUT_FILE="$CONFIG_DIR/shortcut.txt"
 REWRITE_MODE_FILE="$CONFIG_DIR/rewrite_mode.txt"
 OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
 OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
+PAUSE_MEDIA_FILE="$CONFIG_DIR/pause_media_while_recording.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
 DEFAULT_REWRITE_MODE="literal"
 DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
+DEFAULT_PAUSE_MEDIA_WHILE_RECORDING="false"
 COMMAND_NAME="${0##*/}"
 
 usage() {
   cat <<USAGE
 Usage:
   ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
-  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
-  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
+  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
+  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
   ${COMMAND_NAME} stop
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
+  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} uninstall
 
@@ -82,6 +84,25 @@ normalize_rewrite_mode() {
   case "$mode" in
     literal|smart)
       printf '%s\n' "$mode"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+normalize_boolean() {
+  local value="$1"
+  value="$(trim "$value")"
+  value="${value,,}"
+  case "$value" in
+    1|true|yes|on)
+      printf '%s\n' "true"
+      return 0
+      ;;
+    0|false|no|off)
+      printf '%s\n' "false"
       return 0
       ;;
     *)
@@ -184,6 +205,45 @@ rewrite_mode_source() {
   fi
   if [[ -f "$REWRITE_MODE_FILE" ]]; then
     printf '%s\n' "file:$REWRITE_MODE_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
+resolve_pause_media_while_recording() {
+  local value
+  local env_value="${MURMUR_PAUSE_MEDIA_WHILE_RECORDING:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    if value="$(normalize_boolean "$env_value" 2>/dev/null)"; then
+      printf '%s\n' "$value"
+      return
+    fi
+    echo "warning: invalid MURMUR_PAUSE_MEDIA_WHILE_RECORDING '$env_value'; using defaults" >&2
+  fi
+
+  local file_value
+  file_value="$(read_file_value "$PAUSE_MEDIA_FILE" || true)"
+  if [[ -n "$file_value" ]]; then
+    if value="$(normalize_boolean "$file_value" 2>/dev/null)"; then
+      printf '%s\n' "$value"
+      return
+    fi
+    echo "warning: invalid pause-media setting in $PAUSE_MEDIA_FILE ('$file_value'); using defaults" >&2
+  fi
+
+  printf '%s\n' "$DEFAULT_PAUSE_MEDIA_WHILE_RECORDING"
+}
+
+pause_media_source() {
+  local env_value="${MURMUR_PAUSE_MEDIA_WHILE_RECORDING:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "env:MURMUR_PAUSE_MEDIA_WHILE_RECORDING"
+    return
+  fi
+  if [[ -f "$PAUSE_MEDIA_FILE" ]]; then
+    printf '%s\n' "file:$PAUSE_MEDIA_FILE"
     return
   fi
   printf '%s\n' "default"
@@ -326,10 +386,11 @@ usage: ${COMMAND_NAME} config [set]
 
 examples:
   ${COMMAND_NAME} config
-    # opens interactive TUI with model picker + hotkey presets/custom + API key actions
+    # opens interactive TUI with model picker + hotkey + pause-media + API key actions
   ${COMMAND_NAME} config set --shortcut ctrl+option+space
   ${COMMAND_NAME} config set --reset-shortcut
   ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+  ${COMMAND_NAME} config set --pause-media true
   ${COMMAND_NAME} config set --api-key sk-or-...
   ${COMMAND_NAME} config set --clear-api-key
 USAGE
@@ -338,6 +399,8 @@ USAGE
 config_get() {
   echo "rewrite_mode=$(resolve_rewrite_mode)"
   echo "rewrite_mode_source=$(rewrite_mode_source)"
+  echo "pause_media_while_recording=$(resolve_pause_media_while_recording)"
+  echo "pause_media_while_recording_source=$(pause_media_source)"
   echo "openrouter_model=$(resolve_openrouter_model)"
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"
@@ -354,7 +417,8 @@ run_swift_config_wizard() {
     --config-dir "$CONFIG_DIR" \
     --default-shortcut "$DEFAULT_SHORTCUT" \
     --default-rewrite-mode "$DEFAULT_REWRITE_MODE" \
-    --default-openrouter-model "$DEFAULT_OPENROUTER_MODEL"
+    --default-openrouter-model "$DEFAULT_OPENROUTER_MODEL" \
+    --default-pause-media-while-recording "$DEFAULT_PAUSE_MEDIA_WHILE_RECORDING"
 }
 
 config_set_interactive() {
@@ -372,7 +436,7 @@ config_set_interactive() {
 }
 
 config_set_non_interactive() {
-  local mode="" model="" api_key="" shortcut="" clear_api_key=0 reset_shortcut=0
+  local mode="" model="" pause_media="" api_key="" shortcut="" clear_api_key=0 reset_shortcut=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -398,6 +462,14 @@ config_set_non_interactive() {
           return 2
         fi
         api_key="$2"
+        shift 2
+        ;;
+      --pause-media)
+        if [[ $# -lt 2 ]]; then
+          echo "--pause-media requires a value (true|false)" >&2
+          return 2
+        fi
+        pause_media="$2"
         shift 2
         ;;
       --shortcut)
@@ -433,7 +505,7 @@ config_set_non_interactive() {
     return 2
   fi
 
-  if [[ -z "$mode" && -z "$model" && -z "$api_key" && -z "$shortcut" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 ]]; then
+  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 ]]; then
     config_set_interactive
     return $?
   fi
@@ -449,6 +521,15 @@ config_set_non_interactive() {
   model="$(trim "$model")"
   if [[ -n "$model" ]]; then
     write_config_value "$OPENROUTER_MODEL_FILE" "$model"
+  fi
+
+  if [[ -n "$pause_media" ]]; then
+    local raw_pause_media="$pause_media"
+    if ! pause_media="$(normalize_boolean "$raw_pause_media" 2>/dev/null)"; then
+      echo "invalid pause-media value '$raw_pause_media'; expected true|false" >&2
+      return 2
+    fi
+    write_config_value "$PAUSE_MEDIA_FILE" "$pause_media"
   fi
 
   api_key="$(trim "$api_key")"
@@ -553,11 +634,12 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
+  pause_media_while_recording="$(resolve_pause_media_while_recording)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
 
@@ -570,6 +652,7 @@ start_bg() {
         --moonshine-script "$script_path" \
         --shortcut "$shortcut_identifier" \
         --rewrite-mode "$rewrite_mode" \
+        --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
         "$@" >"$LOG_FILE" 2>&1 &
     else
@@ -578,6 +661,7 @@ start_bg() {
         --moonshine-script "$script_path" \
         --shortcut "$shortcut_identifier" \
         --rewrite-mode "$rewrite_mode" \
+        --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
         "$@" >"$LOG_FILE" 2>&1 &
     fi
@@ -595,11 +679,12 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
+  pause_media_while_recording="$(resolve_pause_media_while_recording)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
 
@@ -611,6 +696,7 @@ run_fg() {
       --moonshine-script "$script_path" \
       --shortcut "$shortcut_identifier" \
       --rewrite-mode "$rewrite_mode" \
+      --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
       "$@"
   else
@@ -619,6 +705,7 @@ run_fg() {
       --moonshine-script "$script_path" \
       --shortcut "$shortcut_identifier" \
       --rewrite-mode "$rewrite_mode" \
+      --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
       "$@"
   fi
@@ -646,6 +733,8 @@ doctor() {
   echo "shortcut_source=$(shortcut_source)"
   echo "rewrite_mode=$(resolve_rewrite_mode)"
   echo "rewrite_mode_source=$(rewrite_mode_source)"
+  echo "pause_media_while_recording=$(resolve_pause_media_while_recording)"
+  echo "pause_media_while_recording_source=$(pause_media_source)"
   echo "openrouter_model=$(resolve_openrouter_model)"
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"

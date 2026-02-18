@@ -23,6 +23,7 @@ private struct TermKitConfigState {
     let currentShortcut: String
     let currentRewriteMode: String
     let currentModel: String
+    let currentPauseMediaWhileRecording: Bool
     let apiKeyStored: Bool
     let apiKeySource: String
 }
@@ -32,10 +33,12 @@ private struct TermKitConfigStore {
     let defaultShortcut: String
     let defaultRewriteMode: String
     let defaultOpenRouterModel: String
+    let defaultPauseMediaWhileRecording: Bool
 
     private var shortcutPath: String { "\(configDir)/shortcut.txt" }
     private var rewriteModePath: String { "\(configDir)/rewrite_mode.txt" }
     private var modelPath: String { "\(configDir)/openrouter_model.txt" }
+    private var pauseMediaPath: String { "\(configDir)/pause_media_while_recording.txt" }
     private var apiKeyPath: String { "\(configDir)/openrouter_api_key.txt" }
 
     func load() -> TermKitConfigState {
@@ -44,6 +47,7 @@ private struct TermKitConfigStore {
             ?? normalizeRewriteMode(defaultRewriteMode)
             ?? "smart"
         let model = readValue(path: modelPath) ?? defaultOpenRouterModel
+        let pauseMediaWhileRecording = normalizeBoolean(readValue(path: pauseMediaPath)) ?? defaultPauseMediaWhileRecording
         let apiKeyStored = (readValue(path: apiKeyPath) ?? "").isEmpty == false
         let apiKeySource = apiKeyStored ? "file:\(apiKeyPath)" : "unset"
 
@@ -51,6 +55,7 @@ private struct TermKitConfigStore {
             currentShortcut: shortcut,
             currentRewriteMode: rewriteMode,
             currentModel: model,
+            currentPauseMediaWhileRecording: pauseMediaWhileRecording,
             apiKeyStored: apiKeyStored,
             apiKeySource: apiKeySource
         )
@@ -60,10 +65,12 @@ private struct TermKitConfigStore {
         shortcut: TermKitShortcutSelection,
         rewriteMode: String,
         openRouterModel: String?,
+        pauseMediaWhileRecording: Bool,
         apiKey: TermKitAPIKeySelection
     ) throws {
         try ensureConfigDir()
         try writeValue(path: rewriteModePath, value: rewriteMode)
+        try writeValue(path: pauseMediaPath, value: pauseMediaWhileRecording ? "true" : "false")
 
         if let openRouterModel {
             try writeValue(path: modelPath, value: openRouterModel)
@@ -124,6 +131,21 @@ private struct TermKitConfigStore {
         }
         try FileManager.default.removeItem(atPath: path)
     }
+
+    private func normalizeBoolean(_ raw: String?) -> Bool? {
+        guard let raw else {
+            return nil
+        }
+
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
+        }
+    }
 }
 
 private enum TermKitWizardError: Error {
@@ -176,10 +198,12 @@ private final class TermKitConfigWizardApp {
     private var shortcutSelection: TermKitShortcutSelection = .keep
     private var rewriteMode: String
     private var selectedModel: String
+    private var pauseMediaWhileRecording: Bool
 
     private let rewriteModeValueLabel = Label("")
     private let modelValueLabel = Label("")
     private let hotkeyValueLabel = Label("")
+    private let pauseMediaValueLabel = Label("")
     private let apiKeySourceLabel = Label("")
     private let apiKeyField = TextField("")
     private let clearAPIKeyCheckbox = Checkbox("Clear stored API key")
@@ -195,6 +219,7 @@ private final class TermKitConfigWizardApp {
         self.initialState = store.load()
         self.rewriteMode = initialState.currentRewriteMode
         self.selectedModel = initialState.currentModel
+        self.pauseMediaWhileRecording = initialState.currentPauseMediaWhileRecording
     }
 
     func run() -> Never {
@@ -277,28 +302,44 @@ private final class TermKitConfigWizardApp {
             self.chooseHotkey()
         }
 
+        let pauseMediaTitle = Label("Pause media while recording:")
+        pauseMediaTitle.x = Pos.at(2)
+        pauseMediaTitle.y = Pos.at(17)
+
+        pauseMediaValueLabel.x = Pos.at(32)
+        pauseMediaValueLabel.y = Pos.top(of: pauseMediaTitle)
+        pauseMediaValueLabel.width = Dim.sized(34)
+
+        let pauseMediaButton = Button("_Choose")
+        pauseMediaButton.colorScheme = theme.actionButton
+        pauseMediaButton.x = Pos.right(of: pauseMediaValueLabel) + 1
+        pauseMediaButton.y = Pos.top(of: pauseMediaTitle)
+        pauseMediaButton.clicked = { _ in
+            self.choosePauseMediaMode()
+        }
+
         let apiKeyTitle = Label("OpenRouter API key (leave blank to keep current):")
         apiKeyTitle.x = Pos.at(2)
-        apiKeyTitle.y = Pos.at(17)
+        apiKeyTitle.y = Pos.at(19)
 
         apiKeySourceLabel.x = Pos.at(2)
-        apiKeySourceLabel.y = Pos.at(18)
+        apiKeySourceLabel.y = Pos.at(20)
 
         apiKeyField.x = Pos.at(2)
-        apiKeyField.y = Pos.at(19)
+        apiKeyField.y = Pos.at(21)
         apiKeyField.width = Dim.sized(72)
         apiKeyField.secret = true
         apiKeyField.colorScheme = theme.textInput
 
         clearAPIKeyCheckbox.x = Pos.at(2)
-        clearAPIKeyCheckbox.y = Pos.at(20)
+        clearAPIKeyCheckbox.y = Pos.at(22)
         clearAPIKeyCheckbox.colorScheme = theme.actionButton
 
         let saveButton = Button("_Save")
         saveButton.isDefault = true
         saveButton.colorScheme = theme.actionButton
         saveButton.x = Pos.at(2)
-        saveButton.y = Pos.at(21)
+        saveButton.y = Pos.at(23)
         saveButton.clicked = { _ in
             self.saveAndExit()
         }
@@ -324,6 +365,9 @@ private final class TermKitConfigWizardApp {
             hotkeyTitle,
             hotkeyValueLabel,
             hotkeyButton,
+            pauseMediaTitle,
+            pauseMediaValueLabel,
+            pauseMediaButton,
             apiKeyTitle,
             apiKeySourceLabel,
             apiKeyField,
@@ -431,6 +475,21 @@ private final class TermKitConfigWizardApp {
         }
     }
 
+    private func choosePauseMediaMode() {
+        let options = ["Enabled", "Disabled"]
+        let currentIndex = pauseMediaWhileRecording ? 0 : 1
+
+        presentSelectionDialog(
+            title: "Pause Media While Recording",
+            options: options,
+            selectedIndex: currentIndex
+        ) { index in
+            self.pauseMediaWhileRecording = index == 0
+            self.refreshLabels()
+            return nil
+        }
+    }
+
     private func resolvedHotkeyValue() -> String {
         switch shortcutSelection {
         case .keep:
@@ -459,6 +518,7 @@ private final class TermKitConfigWizardApp {
             hotkeyValueLabel.text = "default (\(store.defaultShortcut))"
         }
 
+        pauseMediaValueLabel.text = pauseMediaWhileRecording ? "enabled" : "disabled"
         apiKeySourceLabel.text = "Current key source: \(initialState.apiKeySource)"
     }
 
@@ -489,6 +549,7 @@ private final class TermKitConfigWizardApp {
                 shortcut: shortcutSelection,
                 rewriteMode: rewriteMode,
                 openRouterModel: rewriteMode == "smart" ? selectedModel : nil,
+                pauseMediaWhileRecording: pauseMediaWhileRecording,
                 apiKey: apiKeyAction
             )
             Application.shutdown(statusCode: 0)
@@ -615,7 +676,8 @@ enum TermKitConfigWizard {
         configDir: String,
         defaultShortcut: String,
         defaultRewriteMode: String,
-        defaultOpenRouterModel: String
+        defaultOpenRouterModel: String,
+        defaultPauseMediaWhileRecording: Bool
     ) -> Never {
         guard isatty(STDIN_FILENO) == 1 && isatty(STDOUT_FILENO) == 1 else {
             fputs("interactive config requires a TTY.\n", stderr)
@@ -626,7 +688,8 @@ enum TermKitConfigWizard {
             configDir: configDir,
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
-            defaultOpenRouterModel: defaultOpenRouterModel
+            defaultOpenRouterModel: defaultOpenRouterModel,
+            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
         )
 
         TermKitConfigWizardApp(store: store).run()

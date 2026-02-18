@@ -17,6 +17,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.rewriteWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.pauseMediaWarning {
+            emit("warning=\(warning)")
+        }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
@@ -27,7 +30,8 @@ struct MurmurMenuBarApp {
             overlayPreviewState: arguments.overlayPreviewState,
             rewriteMode: arguments.rewriteMode,
             openRouterModel: arguments.openRouterModel,
-            openRouterAPIKey: arguments.openRouterAPIKey
+            openRouterAPIKey: arguments.openRouterAPIKey,
+            pauseMediaWhileRecording: arguments.pauseMediaWhileRecording
         )
 
         let delegate = AppDelegate(
@@ -59,6 +63,8 @@ private struct Arguments {
     let openRouterModel: String
     let openRouterAPIKey: String?
     let rewriteWarning: String?
+    let pauseMediaWhileRecording: Bool
+    let pauseMediaWarning: String?
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         let currentDirectory = FileManager.default.currentDirectoryPath
@@ -70,6 +76,10 @@ private struct Arguments {
         )
         let rewriteResolution = resolveRewriteMode(
             explicit: value(after: "--rewrite-mode", in: rawArgs),
+            environment: environment
+        )
+        let pauseMediaResolution = resolvePauseMediaWhileRecording(
+            explicit: value(after: "--pause-media-while-recording", in: rawArgs),
             environment: environment
         )
 
@@ -92,7 +102,9 @@ private struct Arguments {
             rewriteMode: rewriteResolution.mode,
             openRouterModel: resolveOpenRouterModel(explicit: value(after: "--openrouter-model", in: rawArgs), environment: environment),
             openRouterAPIKey: resolveOpenRouterAPIKey(explicit: value(after: "--openrouter-api-key", in: rawArgs), environment: environment),
-            rewriteWarning: rewriteResolution.warning
+            rewriteWarning: rewriteResolution.warning,
+            pauseMediaWhileRecording: pauseMediaResolution.enabled,
+            pauseMediaWarning: pauseMediaResolution.warning
         )
     }
 
@@ -195,6 +207,50 @@ private struct Arguments {
         return nil
     }
 
+    private static func resolvePauseMediaWhileRecording(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (enabled: Bool, warning: String?) {
+        if let explicit {
+            guard let parsed = parseBool(explicit) else {
+                return (
+                    false,
+                    "invalid pause-media value '\(explicit)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        if let envValue = environment["MURMUR_PAUSE_MEDIA_WHILE_RECORDING"],
+           !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard let parsed = parseBool(envValue) else {
+                return (
+                    false,
+                    "invalid MURMUR_PAUSE_MEDIA_WHILE_RECORDING '\(envValue)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        return (false, nil)
+    }
+
+    private static func parseBool(_ rawValue: String) -> Bool? {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch normalized {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
+        }
+    }
+
 }
 
 @MainActor
@@ -219,7 +275,8 @@ private final class MenuBarRuntime {
         overlayPreviewState: OverlayPreviewState?,
         rewriteMode: TranscriptRewriteMode,
         openRouterModel: String,
-        openRouterAPIKey: String?
+        openRouterAPIKey: String?,
+        pauseMediaWhileRecording: Bool
     ) {
         self.menuBarController = menuBarController
         self.overlayPreviewState = overlayPreviewState
@@ -269,6 +326,14 @@ private final class MenuBarRuntime {
                 }
             }
         )
+        let recordingMediaController: RecordingMediaControlling
+        if pauseMediaWhileRecording {
+            recordingMediaController = AppRecordingMediaController(logger: logger)
+            logger.log("pause_media_while_recording enabled=true")
+        } else {
+            recordingMediaController = NoopRecordingMediaController()
+            logger.log("pause_media_while_recording enabled=false")
+        }
         let orchestrator = SessionOrchestrator(
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
@@ -279,6 +344,7 @@ private final class MenuBarRuntime {
             fieldWriter: FocusedFieldWriter(),
             statusUI: statusUI,
             feedback: feedback,
+            recordingMediaController: recordingMediaController,
             transcriptHistory: transcriptHistory,
             logger: logger
         )
@@ -1309,6 +1375,122 @@ private enum FeedbackSoundLibrary {
         }
         sound.volume = id.volume
         return sound
+    }
+}
+
+private final class AppRecordingMediaController: RecordingMediaControlling, @unchecked Sendable {
+    private enum Player: String, CaseIterable, Hashable {
+        case music = "Music"
+        case spotify = "Spotify"
+    }
+
+    private let queue = DispatchQueue(label: "murmur.recording.media")
+    private let logger: Logging
+    private var pausedPlayers: Set<Player> = []
+
+    init(logger: Logging) {
+        self.logger = logger
+    }
+
+    func pauseMediaForRecording() {
+        queue.async {
+            self.pausedPlayers.removeAll(keepingCapacity: true)
+            for player in Player.allCases {
+                if self.pauseIfNeeded(player: player) {
+                    self.pausedPlayers.insert(player)
+                }
+            }
+        }
+    }
+
+    func resumeMediaAfterRecording() {
+        queue.async {
+            let playersToResume = self.pausedPlayers
+            self.pausedPlayers.removeAll(keepingCapacity: true)
+            for player in playersToResume {
+                self.resume(player: player)
+            }
+        }
+    }
+
+    private func pauseIfNeeded(player: Player) -> Bool {
+        let output = runAppleScript(
+            """
+            try
+                if application "\(player.rawValue)" is running then
+                    tell application "\(player.rawValue)"
+                        if player state is playing then
+                            pause
+                            return "paused"
+                        end if
+                    end tell
+                end if
+            on error
+                return "noop"
+            end try
+            return "noop"
+            """
+        )
+        return output == "paused"
+    }
+
+    private func resume(player: Player) {
+        _ = runAppleScript(
+            """
+            try
+                if application "\(player.rawValue)" is running then
+                    tell application "\(player.rawValue)" to play
+                end if
+            on error
+            end try
+            return "done"
+            """
+        )
+    }
+
+    private func runAppleScript(_ script: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            logger.log("media_control_runner_failed error=\"\(escapeLogValue(error.localizedDescription))\"")
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            if let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !errorText.isEmpty
+            {
+                logger.log(
+                    "media_control_script_failed status=\(process.terminationStatus) details=\"\(escapeLogValue(errorText))\""
+                )
+            }
+            return nil
+        }
+
+        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output?.isEmpty == true ? nil : output
+    }
+
+    private func escapeLogValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
     }
 }
 

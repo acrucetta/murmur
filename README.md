@@ -99,12 +99,15 @@ Interactive wizard:
 murmur config
 ```
 
-Scriptable updates:
+Use this as the primary configuration path. New settings should land here first.
+
+Manual CLI (reference/fallback):
 
 ```bash
 murmur config set --shortcut "ctrl+option+space"
 murmur config set --reset-shortcut
 murmur config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+murmur config set --pause-media true
 murmur config set --api-key "<token>"
 murmur config set --clear-api-key
 ```
@@ -114,6 +117,11 @@ Config precedence:
 2. Environment variables (`MURMUR_*`, `OPENROUTER_API_KEY`)
 3. Config files in `~/Library/Application Support/Murmur`
 4. Built-in defaults (`literal` mode, default model id)
+
+Media pause behavior:
+- Optional setting: `pause_media_while_recording` (`false` by default).
+- When enabled, Murmur will best-effort pause/resume Music and Spotify while recording is active.
+- You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
 
 ## Logging and Grep
 
@@ -144,12 +152,12 @@ rg "level=info warning=" /tmp/murmur-menubar.log
 ## CLI Reference
 
 ```bash
-murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
-murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
+murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
+murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
 murmur stop
 murmur logs
 murmur config
-murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
+murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--api-key <token>] [--clear-api-key]
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
 murmur uninstall

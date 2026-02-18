@@ -13,6 +13,7 @@ public final class SessionOrchestrator {
     private let fieldWriter: FocusedFieldWriting
     private let statusUI: StatusPresenting
     private let feedback: FeedbackPresenting
+    private let recordingMediaController: RecordingMediaControlling
     private let transcriptHistory: TranscriptHistoryWriting
     private let logger: Logging
     private let now: NowProvider
@@ -36,6 +37,7 @@ public final class SessionOrchestrator {
         fieldWriter: FocusedFieldWriting,
         statusUI: StatusPresenting,
         feedback: FeedbackPresenting = NoopFeedbackPresenter(),
+        recordingMediaController: RecordingMediaControlling = NoopRecordingMediaController(),
         transcriptHistory: TranscriptHistoryWriting = NoopTranscriptHistoryWriter(),
         logger: Logging,
         now: @escaping NowProvider = Date.init,
@@ -50,6 +52,7 @@ public final class SessionOrchestrator {
         self.fieldWriter = fieldWriter
         self.statusUI = statusUI
         self.feedback = feedback
+        self.recordingMediaController = recordingMediaController
         self.transcriptHistory = transcriptHistory
         self.logger = logger
         self.now = now
@@ -64,6 +67,7 @@ public final class SessionOrchestrator {
             transition(event)
             if state == .finalizing {
                 feedback.recordingDidStop()
+                recordingMediaController.resumeMediaAfterRecording()
                 releaseTimestamp = releaseDate(from: event)
                 audioCapture.stop()
                 let finalTranscript = asrEngine.stopAndFinalize()
@@ -138,6 +142,7 @@ public final class SessionOrchestrator {
 
         transition(event)
         if state == .listening {
+            recordingMediaController.pauseMediaForRecording()
             audioCapture.start()
             asrEngine.start()
             feedback.recordingDidStart()

@@ -26,12 +26,19 @@ struct DictationPreviewCLI {
             runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier)
         case .captureShortcut:
             runCaptureShortcut()
-        case .configWizard(let configDir, let defaultShortcut, let defaultRewriteMode, let defaultOpenRouterModel):
+        case .configWizard(
+            let configDir,
+            let defaultShortcut,
+            let defaultRewriteMode,
+            let defaultOpenRouterModel,
+            let defaultPauseMediaWhileRecording
+        ):
             runConfigWizard(
                 configDir: configDir,
                 defaultShortcut: defaultShortcut,
                 defaultRewriteMode: defaultRewriteMode,
-                defaultOpenRouterModel: defaultOpenRouterModel
+                defaultOpenRouterModel: defaultOpenRouterModel,
+                defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
             )
         case .invalid:
             print(Arguments.usage)
@@ -286,13 +293,15 @@ struct DictationPreviewCLI {
         configDir: String,
         defaultShortcut: String,
         defaultRewriteMode: String,
-        defaultOpenRouterModel: String
+        defaultOpenRouterModel: String,
+        defaultPauseMediaWhileRecording: Bool
     ) {
         TermKitConfigWizard.run(
             configDir: configDir,
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
-            defaultOpenRouterModel: defaultOpenRouterModel
+            defaultOpenRouterModel: defaultOpenRouterModel,
+            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
         )
     }
 
@@ -321,7 +330,13 @@ private struct Arguments {
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
         case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?)
         case captureShortcut
-        case configWizard(configDir: String, defaultShortcut: String, defaultRewriteMode: String, defaultOpenRouterModel: String)
+        case configWizard(
+            configDir: String,
+            defaultShortcut: String,
+            defaultRewriteMode: String,
+            defaultOpenRouterModel: String,
+            defaultPauseMediaWhileRecording: Bool
+        )
         case invalid
     }
 
@@ -332,7 +347,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --capture-shortcut
-      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct]
+      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false]
     """
 
     let mode: Mode
@@ -405,12 +420,15 @@ private struct Arguments {
             let defaultShortcut = value(after: "--default-shortcut", in: rawArgs) ?? "ctrl+shift+space"
             let defaultRewriteMode = value(after: "--default-rewrite-mode", in: rawArgs) ?? "literal"
             let defaultOpenRouterModel = value(after: "--default-openrouter-model", in: rawArgs) ?? "mistralai/mistral-small-3.1-24b-instruct"
+            let defaultPauseMediaRaw = value(after: "--default-pause-media-while-recording", in: rawArgs) ?? "false"
+            let defaultPauseMedia = parseBool(defaultPauseMediaRaw) ?? false
             return Arguments(
                 mode: .configWizard(
                     configDir: configDir,
                     defaultShortcut: defaultShortcut,
                     defaultRewriteMode: defaultRewriteMode,
-                    defaultOpenRouterModel: defaultOpenRouterModel
+                    defaultOpenRouterModel: defaultOpenRouterModel,
+                    defaultPauseMediaWhileRecording: defaultPauseMedia
                 )
             )
         }
@@ -430,6 +448,17 @@ private struct Arguments {
 
         let value = args[next].trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    private static func parseBool(_ rawValue: String) -> Bool? {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
+        }
     }
 }
 

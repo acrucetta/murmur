@@ -35,3 +35,16 @@ final class FeedbackSpy: FeedbackPresenting {
         recordingStopCount += 1
     }
 }
+
+final class RecordingMediaSpy: RecordingMediaControlling {
+    private(set) var pauseCallCount = 0
+    private(set) var resumeCallCount = 0
+
+    func pauseMediaForRecording() {
+        pauseCallCount += 1
+    }
+
+    func resumeMediaAfterRecording() {
+        resumeCallCount += 1
+    }
+}
