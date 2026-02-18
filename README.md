@@ -76,7 +76,6 @@ Run in background:
 
 ```bash
 murmur start
-murmur status
 murmur logs
 murmur stop
 ```
@@ -175,8 +174,8 @@ User Hotkey
 ```bash
 murmur run
 murmur run --rewrite-mode literal|smart [--openrouter-model <id>]
-murmur start|stop|restart|status|logs
-murmur config [wizard|get|set ...]
+murmur start|stop|logs
+murmur config [set ...]
 murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]

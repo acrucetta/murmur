@@ -19,37 +19,25 @@ COMMAND_NAME="${0##*/}"
 usage() {
   cat <<USAGE
 Usage:
+  ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
   ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
   ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
   ${COMMAND_NAME} stop
-  ${COMMAND_NAME} restart [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>]
-  ${COMMAND_NAME} status
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config [wizard|get|set]
   ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} doctor
-  ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
   ${COMMAND_NAME} uninstall
 
-Interactive config:
-  ${COMMAND_NAME} config
-    - terminal TUI with curated model picker + custom model
-    - hotkey flow: keep/reset/preset/custom
-    - API key flow: set/replace/clear
-
-Environment overrides:
-  MURMUR_MOONSHINE_PYTHON  Absolute python path (default: VIRTUAL_ENV/bin/python3, then .venv/bin/python3, then python3)
-  MURMUR_MOONSHINE_SCRIPT  Moonshine bridge script path
-  MURMUR_SETUP_PYTHON      Python executable used by install (default: python3)
-  MURMUR_SHORTCUT          Hotkey combo override (for example: ctrl+shift+space)
-  MURMUR_REWRITE_MODE      Rewrite mode: literal|smart (default: smart)
-  MURMUR_OPENROUTER_MODEL  OpenRouter model id for smart mode (default: mistralai/mistral-small-3.1-24b-instruct)
-  MURMUR_OPENROUTER_API_KEY  OpenRouter API token (preferred)
-  OPENROUTER_API_KEY       OpenRouter API token fallback
-  MURMUR_TRANSCRIPTS_DIR   Transcription history folder (default: ~/Library/Application Support/Murmur/transcriptions)
-  MURMUR_CONFIG_DIR        Config folder (default: ~/Library/Application Support/Murmur)
-  MURMUR_BIN_DIR           Install directory for global CLI (default: ~/.local/bin)
+Commands:
+  install    setup deps/models and global CLI link
+  run        run in foreground
+  start      run in background
+  stop       stop background process
+  logs       tail background log
+  config     interactive TUI config wizard
+  doctor     print effective runtime config and health
+  uninstall  remove global CLI link
 USAGE
 }
 
@@ -311,7 +299,7 @@ shortcut_get() {
 
 show_restart_note_if_running() {
   if is_running; then
-    echo "note: restart murmur for config changes to apply"
+    echo "note: stop and start murmur for config changes to apply"
   fi
 }
 
@@ -334,13 +322,11 @@ clear_shortcut_value() {
 
 config_usage() {
   cat <<USAGE
-usage: ${COMMAND_NAME} config [wizard|get|set]
+usage: ${COMMAND_NAME} config [set]
 
 examples:
   ${COMMAND_NAME} config
     # opens interactive TUI with model picker + hotkey presets/custom + API key actions
-  ${COMMAND_NAME} config wizard
-  ${COMMAND_NAME} config get
   ${COMMAND_NAME} config set --shortcut ctrl+option+space
   ${COMMAND_NAME} config set --reset-shortcut
   ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
@@ -490,28 +476,30 @@ config_set_non_interactive() {
 }
 
 config_command() {
-  local action="${1:-wizard}"
+  local action="${1:-}"
   if [[ $# -gt 0 ]]; then
     shift
   fi
 
+  if [[ -z "$action" ]]; then
+    config_set_interactive
+    return $?
+  fi
   if [[ "$action" == --* ]]; then
     config_set_non_interactive "$action" "$@"
     return $?
   fi
 
   case "$action" in
-    get)
-      config_get
-      ;;
-    wizard|quick)
-      config_set_interactive
-      ;;
     set)
       config_set_non_interactive "$@"
       ;;
     -h|--h|--help|help)
       config_usage
+      ;;
+    wizard|quick|get)
+      echo "config subcommand '$action' was removed; use '${COMMAND_NAME} config' or '${COMMAND_NAME} config set ...'" >&2
+      return 2
       ;;
     *)
       echo "unknown config action: $action" >&2
@@ -647,17 +635,6 @@ stop_bg() {
   kill "$pid" 2>/dev/null || true
   rm -f "$PID_FILE"
   echo "murmur stopped"
-}
-
-status_bg() {
-  if is_running; then
-    local pid
-    pid="$(cat "$PID_FILE")"
-    echo "murmur running (pid $pid)"
-    echo "log: $LOG_FILE"
-  else
-    echo "murmur not running"
-  fi
 }
 
 doctor() {
@@ -874,13 +851,6 @@ start)
 stop)
   stop_bg
   ;;
-restart)
-  stop_bg
-  start_bg "$@"
-  ;;
-status)
-  status_bg
-  ;;
 logs)
   touch "$LOG_FILE"
   tail -f "$LOG_FILE"
@@ -900,12 +870,8 @@ uninstall)
 help|-h|--h|--help)
   usage
   ;;
-setup|shortcut|history|history-path)
-  echo "command '$cmd' was removed; use '${COMMAND_NAME} config' and '${COMMAND_NAME} doctor' flows instead" >&2
-  usage >&2
-  exit 2
-  ;;
 *)
+  echo "unknown command: $cmd" >&2
   usage >&2
   exit 2
   ;;
