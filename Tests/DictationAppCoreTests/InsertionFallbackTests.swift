@@ -84,6 +84,26 @@ struct InsertionFallbackTests {
         #expect(result.error == .engineError)
         #expect(fallback.callCount == 0)
     }
+
+#if canImport(AppKit)
+    @Test
+    func terminalBundleForcesClipboardFallback() {
+        let direct = AccessibilityDirectInserter(frontmostBundleIdentifier: { "com.apple.Terminal" })
+        let fallback = ClipboardInserterSpy(
+            nextResult: .init(success: true, method: .clipboardPaste, error: nil)
+        )
+        let writer = FocusedFieldWriter(
+            directInserter: direct,
+            clipboardFallbackInserter: fallback
+        )
+
+        let result = writer.insert("hello")
+
+        #expect(result.success == true)
+        #expect(result.method == .clipboardPaste)
+        #expect(fallback.callCount == 1)
+    }
+#endif
 }
 
 private final class DirectInserterSpy: AccessibilityDirectInserting {

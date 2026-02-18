@@ -4,11 +4,51 @@ import AppKit
 import ApplicationServices
 #endif
 
+enum InsertionSurfacePolicy {
+    static let forcedClipboardBundleIdentifiers: Set<String> = [
+        "com.apple.notes",
+        "com.apple.terminal",
+        "com.github.wez.wezterm",
+        "com.googlecode.iterm2",
+        "com.mitchellh.ghostty",
+        "dev.warp.warp-stable",
+        "net.kovidgoyal.kitty",
+        "org.alacritty",
+    ]
+
+    static func requiresClipboardFallback(bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else {
+            return false
+        }
+
+        let normalized = bundleIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else {
+            return false
+        }
+
+        return forcedClipboardBundleIdentifiers.contains(normalized)
+    }
+}
+
 #if canImport(AppKit)
 public final class AccessibilityDirectInserter: AccessibilityDirectInserting {
-    public init() {}
+    private let frontmostBundleIdentifier: () -> String?
+
+    public init(
+        frontmostBundleIdentifier: @escaping () -> String? = {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+    ) {
+        self.frontmostBundleIdentifier = frontmostBundleIdentifier
+    }
 
     public func insertDirect(_ text: String) -> InsertResult {
+        if InsertionSurfacePolicy.requiresClipboardFallback(bundleIdentifier: frontmostBundleIdentifier()) {
+            return .init(success: false, method: .accessibilityDirect, error: .insertionFailed)
+        }
+
         guard AXIsProcessTrusted() else {
             return .init(success: false, method: .accessibilityDirect, error: .permissionDenied)
         }
