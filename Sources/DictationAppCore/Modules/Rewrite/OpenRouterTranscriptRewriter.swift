@@ -111,6 +111,7 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
         "me", "my", "of", "on", "or", "our", "she", "should", "that", "the", "their", "them", "there",
         "they", "this", "to", "was", "we", "were", "will", "with", "would", "you", "your",
     ]
+    private static let protectedSymbols: [Character] = ["!", "?", "@"]
 
     private let config: OpenRouterTranscriptRewriterConfig
     private let transport: OpenRouterTransporting
@@ -149,6 +150,11 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
 
         guard config.requestTimeoutSeconds > 0 else {
             logger.log("smart_rewrite_skipped reason=invalid_request_timeout")
+            return nil
+        }
+
+        guard containsAlphabeticWord(trimmed) else {
+            logger.log("smart_rewrite_skipped reason=non_prose_input")
             return nil
         }
 
@@ -269,6 +275,10 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
     }
 
     private func rewriteRejectionReason(candidate: String, original: String) -> String? {
+        if hasDroppedProtectedSymbols(candidate: candidate, original: original) {
+            return "dropped_symbol"
+        }
+
         if hasUnboundedExpansion(candidate: candidate, original: original) {
             return "length_spike"
         }
@@ -278,6 +288,13 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
         }
 
         return nil
+    }
+
+    private func hasDroppedProtectedSymbols(candidate: String, original: String) -> Bool {
+        for symbol in Self.protectedSymbols where original.contains(symbol) && !candidate.contains(symbol) {
+            return true
+        }
+        return false
     }
 
     private func hasUnboundedExpansion(candidate: String, original: String) -> Bool {
@@ -332,6 +349,15 @@ public final class OpenRouterTranscriptRewriter: TranscriptRewriting {
 
     private func contentTokens(from text: String) -> [String] {
         canonicalTokens(from: text).filter { !Self.contentStopWords.contains($0) }
+    }
+
+    private func containsAlphabeticWord(_ text: String) -> Bool {
+        for token in text.split(whereSeparator: \.isWhitespace) {
+            if token.rangeOfCharacter(from: .letters) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     private func canonicalTokens(from text: String) -> [String] {

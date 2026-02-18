@@ -96,6 +96,64 @@ struct OpenRouterTranscriptRewriterTests {
     }
 
     @Test
+    func skipsRewriteWhenInputHasNoAlphabeticWords() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"ghostty!"}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "!",
+            context: .init(frontmostAppBundleID: "com.mitchellh.ghostty", frontmostAppName: "Ghostty", mode: "smart")
+        )
+
+        #expect(result == nil)
+        #expect(transport.callCount == 0)
+    }
+
+    @Test
+    func skipsRewriteWhenInputIsOnlyNumbersAndSymbols() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"This should not be used."}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "2026-02-18 ?",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == nil)
+        #expect(transport.callCount == 0)
+    }
+
+    @Test
     func returnsNilWhenModelReturnsRefusalText() {
         let transport = OpenRouterTransportSpy()
         transport.nextResponse = .init(
@@ -177,6 +235,62 @@ struct OpenRouterTranscriptRewriterTests {
         )
 
         #expect(result == nil)
+    }
+
+    @Test
+    func returnsNilWhenRewriteDropsExclamationSymbol() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"That's an exclamation mark."}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "That's an!",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == nil)
+    }
+
+    @Test
+    func keepsRewriteWhenRequiredSymbolsArePreserved() {
+        let transport = OpenRouterTransportSpy()
+        transport.nextResponse = .init(
+            statusCode: 200,
+            body: Data(
+                """
+                {"choices":[{"message":{"content":"That's an awesome day!"}}]}
+                """.utf8
+            )
+        )
+        let rewriter = OpenRouterTranscriptRewriter(
+            config: .init(
+                apiKey: "test-token",
+                model: "mistralai/mistral-small-3.1-24b-instruct"
+            ),
+            transport: transport,
+            logger: NoopLogger()
+        )
+
+        let result = rewriter.rewrite(
+            "That's a great day!",
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: "smart")
+        )
+
+        #expect(result == "That's an awesome day!")
     }
 }
 

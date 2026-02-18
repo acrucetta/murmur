@@ -107,11 +107,43 @@ struct TextPostProcessorTests {
     }
 
     @Test
+    func convertsSpokenExclamationMarkInStatement() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("that's an exclamation mark")
+
+        #expect(cleaned == "That's an!")
+    }
+
+    @Test
     func convertsSpokenQuestionMark() {
         let processor = TextPostProcessorV2()
         let cleaned = processor.clean("are you coming question mark")
 
         #expect(cleaned == "Are you coming?")
+    }
+
+    @Test
+    func convertsSpokenExclamationPointVariant() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("nice one exclamation point")
+
+        #expect(cleaned == "Nice one!")
+    }
+
+    @Test
+    func convertsSpokenQuestionPointVariant() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("are we ready question point")
+
+        #expect(cleaned == "Are we ready?")
+    }
+
+    @Test
+    func convertsMixedSpokenPunctuationPhrases() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean("really question mark wow exclamation point")
+
+        #expect(cleaned == "Really? wow!")
     }
 
     @Test
