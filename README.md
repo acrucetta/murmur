@@ -24,6 +24,27 @@ Usage flow:
 3. Speak, then release.
 4. Murmur inserts cleaned text.
 
+Visual flow (plain English + technical labels):
+
+```mermaid
+flowchart LR
+  A[Hold hotkey] --> B[Speak naturally]
+  B --> C[ASR engine: Moonshine<br/>Turns audio into text]
+  C --> D[TextPostProcessor<br/>Cleans punctuation/fillers]
+  D --> E{Rewrite mode}
+  E -->|literal| F[Use cleaned text directly]
+  E -->|smart| G[Optional OpenRouter rewrite]
+  G --> H[Guardrails verify quality]
+  F --> I[Insert text in focused app]
+  H --> I
+  I --> J[Store local history entry]
+```
+
+Quick glossary:
+- `ASR` (Automatic Speech Recognition): speech-to-text conversion.
+- `SessionOrchestrator`: the "traffic controller" that coordinates capture, rewrite, and insertion.
+- `Guardrails`: safety checks that reject risky rewrites and fall back to deterministic text.
+
 Background mode:
 
 ```bash
@@ -75,6 +96,20 @@ Default behavior:
 - If you do nothing, Murmur runs in `literal` mode.
 - No API key is required for the default path.
 
+Mode decision flow:
+
+```mermaid
+flowchart TD
+  A[Dictation completed] --> B{rewrite mode}
+  B -->|literal| C[Skip LLM call]
+  B -->|smart| D{API key available?}
+  D -->|no| E[Keep deterministic cleaned text]
+  D -->|yes| F[Request rewrite from OpenRouter]
+  F --> G{Passes guardrails?}
+  G -->|yes| H[Use rewritten text]
+  G -->|no| E
+```
+
 Enable smart mode:
 
 ```bash
@@ -117,6 +152,19 @@ Config precedence:
 2. Environment variables (`MURMUR_*`, `OPENROUTER_API_KEY`)
 3. Config files in `~/Library/Application Support/Murmur`
 4. Built-in defaults (`literal` mode, default model id)
+
+How precedence works:
+
+```mermaid
+flowchart TD
+  A[1) CLI flag provided?] -->|yes| Z[Use CLI value]
+  A -->|no| B[2) Env var provided?]
+  B -->|yes| Z
+  B -->|no| C[3) Config file value present?]
+  C -->|yes| Z
+  C -->|no| D[4) Use built-in default]
+  D --> Z
+```
 
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
@@ -200,18 +248,37 @@ Useful code paths:
 
 ## Architecture
 
-```text
-User Hotkey
-  -> HotkeyController
-  -> SessionOrchestrator
-     -> PermissionManager
-     -> AudioCapture
-     -> ASREngine (Moonshine bridge)
-     -> TextPostProcessorV2
-     -> Optional OpenRouterTranscriptRewriter (smart mode)
-     -> FocusedFieldWriter (Accessibility direct + clipboard fallback)
-     -> TranscriptHistoryStore (local files)
-     -> StatusUI (menu bar)
+```mermaid
+flowchart TD
+  User[User] --> Hotkey[Global hotkey press/release]
+  Hotkey --> Orch[SessionOrchestrator]
+
+  subgraph Capture["Capture + Transcribe"]
+    Perm[PermissionManager]
+    Audio[AudioCapture]
+    ASR[ASREngine<br/>Moonshine local bridge]
+  end
+
+  subgraph Transform["Clean + Rewrite"]
+    Clean[TextPostProcessorV2]
+    Rewrite[OpenRouterTranscriptRewriter<br/>smart mode only]
+  end
+
+  subgraph Output["Insert + Observe"]
+    Writer[FocusedFieldWriter<br/>Accessibility + clipboard fallback]
+    History[TranscriptHistoryStore<br/>local files]
+    UI[StatusUI<br/>menu bar]
+  end
+
+  Orch --> Perm
+  Orch --> Audio
+  Audio --> ASR
+  ASR --> Clean
+  Clean --> Rewrite
+  Clean --> Writer
+  Rewrite --> Writer
+  Writer --> History
+  Orch --> UI
 ```
 
 ## Docs
