@@ -74,7 +74,9 @@ public final class MenuBarController: NSObject {
         button.toolTip = "Murmur Dictation"
         statusItem?.length = NSStatusItem.squareLength
         Swift.print(
-            "metric menu_button_configured title=\(button.title) image_set=\(button.image != nil) length=\(statusItem?.length ?? -1)"
+            RuntimeLogFormatter.format(
+                "metric menu_button_configured title=\(button.title) image_set=\(button.image != nil) length=\(statusItem?.length ?? -1)"
+            )
         )
     }
 
@@ -141,7 +143,7 @@ public final class MenuBarController: NSObject {
 
     private func logDiagnostics() {
         guard let statusItem else {
-            Swift.print("metric menu_bar_diagnostics status_item=false")
+            Swift.print(RuntimeLogFormatter.format("metric menu_bar_diagnostics status_item=false"))
             return
         }
         let hasButton = statusItem.button != nil
@@ -152,7 +154,9 @@ public final class MenuBarController: NSObject {
         let frameString = "\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))"
 
         Swift.print(
-            "metric menu_bar_diagnostics status_item=true button=\(hasButton) attached=\(attached) visible=\(visible) image=\(hasImage) frame=\(frameString)"
+            RuntimeLogFormatter.format(
+                "metric menu_bar_diagnostics status_item=true button=\(hasButton) attached=\(attached) visible=\(visible) image=\(hasImage) frame=\(frameString)"
+            )
         )
     }
 

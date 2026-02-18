@@ -31,7 +31,7 @@ public final class SessionOrchestrator {
         postProcessor: TextPostProcessing,
         transcriptRewriter: TranscriptRewriting = NoopTranscriptRewriter(),
         rewriteContextProvider: RewriteContextProviding = StaticRewriteContextProvider(
-            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: TranscriptRewriteMode.smart.rawValue)
+            context: .init(frontmostAppBundleID: nil, frontmostAppName: nil, mode: TranscriptRewriteMode.literal.rawValue)
         ),
         fieldWriter: FocusedFieldWriting,
         statusUI: StatusPresenting,

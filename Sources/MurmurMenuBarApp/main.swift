@@ -9,13 +9,13 @@ struct MurmurMenuBarApp {
     static func main() {
         let arguments = Arguments.parse(CommandLine.arguments)
         if let warning = arguments.shortcutWarning {
-            Swift.print("warning=\(warning)")
+            emit("warning=\(warning)")
         }
         if let warning = arguments.overlayWarning {
-            Swift.print("warning=\(warning)")
+            emit("warning=\(warning)")
         }
         if let warning = arguments.rewriteWarning {
-            Swift.print("warning=\(warning)")
+            emit("warning=\(warning)")
         }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
@@ -147,19 +147,19 @@ private struct Arguments {
     ) -> (mode: TranscriptRewriteMode, warning: String?) {
         if let explicit {
             guard let parsed = TranscriptRewriteMode.parse(explicit) else {
-                return (.smart, "invalid rewrite mode '\(explicit)'; expected literal|smart")
+                return (.literal, "invalid rewrite mode '\(explicit)'; expected literal|smart")
             }
             return (parsed, nil)
         }
 
         if let envValue = environment["MURMUR_REWRITE_MODE"], !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard let parsed = TranscriptRewriteMode.parse(envValue) else {
-                return (.smart, "invalid MURMUR_REWRITE_MODE '\(envValue)'; expected literal|smart")
+                return (.literal, "invalid MURMUR_REWRITE_MODE '\(envValue)'; expected literal|smart")
             }
             return (parsed, nil)
         }
 
-        return (.smart, nil)
+        return (.literal, nil)
     }
 
     private static func resolveOpenRouterModel(explicit: String?, environment: [String: String]) -> String {
@@ -427,8 +427,12 @@ private final class MenuBarStatusUI: StatusPresenting {
 
 private final class MenuBarLogger: Logging {
     func log(_ message: String) {
-        Swift.print("metric \(message)")
+        emit("metric \(message)")
     }
+}
+
+private func emit(_ line: String) {
+    Swift.print(RuntimeLogFormatter.format(line))
 }
 
 private struct AppRewriteContextProvider: RewriteContextProviding {

@@ -332,7 +332,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
       swift run DictationPreviewCLI --capture-shortcut
-      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode smart] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct]
+      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct]
     """
 
     let mode: Mode
@@ -403,7 +403,7 @@ private struct Arguments {
                 return Arguments(mode: .invalid)
             }
             let defaultShortcut = value(after: "--default-shortcut", in: rawArgs) ?? "ctrl+shift+space"
-            let defaultRewriteMode = value(after: "--default-rewrite-mode", in: rawArgs) ?? "smart"
+            let defaultRewriteMode = value(after: "--default-rewrite-mode", in: rawArgs) ?? "literal"
             let defaultOpenRouterModel = value(after: "--default-openrouter-model", in: rawArgs) ?? "mistralai/mistral-small-3.1-24b-instruct"
             return Arguments(
                 mode: .configWizard(
@@ -639,7 +639,7 @@ private final class LiveCaptureMeter {
 }
 
 private func emit(_ line: String) {
-    Swift.print(line)
+    Swift.print(RuntimeLogFormatter.format(line))
     fflush(stdout)
 }
 

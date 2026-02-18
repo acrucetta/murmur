@@ -12,7 +12,7 @@ REWRITE_MODE_FILE="$CONFIG_DIR/rewrite_mode.txt"
 OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
 OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
-DEFAULT_REWRITE_MODE="smart"
+DEFAULT_REWRITE_MODE="literal"
 DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
 COMMAND_NAME="${0##*/}"
 

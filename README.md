@@ -83,17 +83,17 @@ murmur stop
 When smart rewrite is used, logs include per-turn and session usage counters:
 
 ```text
-metric smart_rewrite_usage model=... turn_prompt_tokens=... turn_completion_tokens=... turn_total_tokens=... turn_cost_usd=... session_turns=... session_total_tokens=... session_cost_usd=...
+ts=... level=info metric smart_rewrite_usage model=... turn_prompt_tokens=... turn_completion_tokens=... turn_total_tokens=... turn_cost_usd=... session_turns=... session_total_tokens=... session_cost_usd=...
 ```
 
 ## Rewrite Modes
 
 `Murmur` supports two rewrite modes:
 
-- `smart` (default): deterministic cleanup + optional OpenRouter polish if API key is configured.
-- `literal`: minimal deterministic cleanup only, no LLM rewrite.
+- `literal` (default): deterministic cleanup only, no LLM rewrite.
+- `smart`: deterministic cleanup + optional OpenRouter polish if API key is configured.
 
-By default, if no OpenRouter API key is set, smart mode still runs local deterministic cleanup and inserts immediately.
+By default, Murmur runs in `literal` mode so it works immediately without any LLM API token.
 
 Enable smart mode with OpenRouter:
 
