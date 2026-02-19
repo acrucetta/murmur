@@ -447,6 +447,7 @@ struct SessionOrchestratorTests {
         )
 
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.05, count: 8_000), sampleRate: 16_000, channels: 1)))
         orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
 
         #expect(rewriter.callCount == 1)
@@ -459,6 +460,47 @@ struct SessionOrchestratorTests {
         }))
         #expect(logger.messages.contains(where: {
             $0.hasPrefix("rewrite_output source=llm changed=true chars=15 preview=\"Ship on Friday.\"")
+        }))
+    }
+
+    @Test
+    func smartRewriteSkipsVeryShortRecordingAndKeepsDeterministicText() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "ship tomorrow", confidence: 0.8)
+        let writer = FakeFieldWriter()
+        let rewriter = RewriteSpy(nextResult: "Ship on Friday.")
+        let logger = LoggerSpy()
+        let contextProvider = FixedRewriteContextProvider(
+            context: .init(
+                frontmostAppBundleID: "com.apple.mail",
+                frontmostAppName: "Mail",
+                mode: "smart"
+            )
+        )
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(mode: .literal),
+            transcriptRewriter: rewriter,
+            rewriteContextProvider: contextProvider,
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.05, count: 400), sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(rewriter.callCount == 0)
+        #expect(writer.lastInsertedText == "Ship tomorrow.")
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("smart_rewrite_skipped reason=short_recording duration_ms=")
+        }))
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("rewrite_output source=original changed=false chars=14 preview=\"Ship tomorrow.\"")
         }))
     }
 

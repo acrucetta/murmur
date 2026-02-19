@@ -2,6 +2,7 @@ import Foundation
 
 public final class SessionOrchestrator {
     public typealias NowProvider = () -> Date
+    private static let minimumSmartRewriteDurationMilliseconds = 350
 
     private let stateMachine: StateMachine
     private let permissionManager: PermissionManaging
@@ -20,6 +21,7 @@ public final class SessionOrchestrator {
     private var releaseTimestamp: Date?
     private var capturedFrameCount = 0
     private var capturedSampleCount = 0
+    private var capturedDurationSeconds: Double = 0
     private var capturedRMSAccumulator: Double = 0
     private var capturedPeakRMS: Float = 0
 
@@ -102,9 +104,14 @@ public final class SessionOrchestrator {
                 let cleaned = postProcessor.clean(finalTranscript.text)
                 let rewriteContext = rewriteContextProvider.currentContext()
                 logRewriteInput(cleaned, mode: rewriteContext.mode)
-                let rewritten = transcriptRewriter
-                    .rewrite(cleaned, context: rewriteContext)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let rewritten: String?
+                if shouldSkipSmartRewriteForShortRecording(mode: rewriteContext.mode) {
+                    rewritten = nil
+                } else {
+                    rewritten = transcriptRewriter
+                        .rewrite(cleaned, context: rewriteContext)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
                 let textToInsert: String
                 if let rewritten, !rewritten.isEmpty {
                     logRewriteOutput(rewritten, source: "llm", changed: rewritten != cleaned)
@@ -243,6 +250,7 @@ public final class SessionOrchestrator {
     private func recordAudioCaptureDiagnostics(for frame: AudioFrame) {
         capturedFrameCount += 1
         capturedSampleCount += frame.samples.count
+        capturedDurationSeconds += frameDurationSeconds(frame)
 
         guard !frame.samples.isEmpty else {
             return
@@ -273,6 +281,7 @@ public final class SessionOrchestrator {
 
         return " captured_frames=\(capturedFrameCount)" +
             " captured_samples=\(capturedSampleCount)" +
+            " captured_duration_ms=\(captureDurationMilliseconds())" +
             " captured_avg_rms=\(formatCaptureValue(averageRMS))" +
             " captured_peak_rms=\(formatCaptureValue(Double(capturedPeakRMS)))" +
             " captured_quality=\(quality)"
@@ -285,8 +294,39 @@ public final class SessionOrchestrator {
     private func resetCaptureDiagnostics() {
         capturedFrameCount = 0
         capturedSampleCount = 0
+        capturedDurationSeconds = 0
         capturedRMSAccumulator = 0
         capturedPeakRMS = 0
+    }
+
+    private func shouldSkipSmartRewriteForShortRecording(mode: String) -> Bool {
+        guard TranscriptRewriteMode.parse(mode) == .smart else {
+            return false
+        }
+
+        let durationMs = captureDurationMilliseconds()
+        guard durationMs < Self.minimumSmartRewriteDurationMilliseconds else {
+            return false
+        }
+
+        logger.log(
+            "smart_rewrite_skipped reason=short_recording duration_ms=\(durationMs)" +
+                " threshold_ms=\(Self.minimumSmartRewriteDurationMilliseconds)"
+        )
+        return true
+    }
+
+    private func captureDurationMilliseconds() -> Int {
+        max(0, Int((capturedDurationSeconds * 1000).rounded()))
+    }
+
+    private func frameDurationSeconds(_ frame: AudioFrame) -> Double {
+        guard frame.sampleRate > 0 else {
+            return 0
+        }
+        let channelCount = max(1, frame.channels)
+        let samplesPerChannel = Double(frame.samples.count) / Double(channelCount)
+        return samplesPerChannel / frame.sampleRate
     }
 
     private func captureQualityLabel() -> String {
