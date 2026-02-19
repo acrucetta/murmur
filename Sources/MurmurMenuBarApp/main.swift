@@ -37,6 +37,7 @@ struct MurmurMenuBarApp {
             model: arguments.model,
             pythonBinary: arguments.pythonBinary,
             scriptPath: arguments.scriptPath,
+            configDirectory: arguments.configDirectory,
             hotkeyShortcuts: arguments.hotkeyShortcuts,
             overlayPreviewState: arguments.overlayPreviewState,
             rewriteMode: arguments.rewriteMode,
@@ -67,6 +68,7 @@ private struct Arguments {
     let model: String
     let pythonBinary: String
     let scriptPath: String
+    let configDirectory: String
     let hotkeyShortcuts: [HotkeyShortcut]
     let shortcutWarning: String?
     let overlayPreviewState: OverlayPreviewState?
@@ -113,6 +115,7 @@ private struct Arguments {
                 currentDirectory: currentDirectory,
                 environment: environment
             ),
+            configDirectory: resolveConfigDirectory(environment: environment),
             hotkeyShortcuts: shortcutResolution.shortcuts,
             shortcutWarning: shortcutResolution.warning,
             overlayPreviewState: overlayPreviewResolution.state,
@@ -293,6 +296,107 @@ private struct Arguments {
         }
     }
 
+    private static func resolveConfigDirectory(environment: [String: String]) -> String {
+        if let explicit = environment["MURMUR_CONFIG_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty
+        {
+            return explicit
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Murmur")
+            .path
+    }
+
+}
+
+private struct MenuBarConfigSnapshot {
+    var shortcutIdentifier: String
+    var rewriteMode: TranscriptRewriteMode
+    var openRouterModel: String
+    var pauseMediaWhileRecording: Bool
+    var preferredMicrophone: String?
+    var availableMicrophones: [AudioInputDevice]
+
+    var menuSnapshot: MenuBarSettingsSnapshot {
+        .init(
+            shortcutIdentifier: shortcutIdentifier,
+            rewriteMode: rewriteMode,
+            openRouterModel: openRouterModel,
+            pauseMediaWhileRecording: pauseMediaWhileRecording,
+            preferredMicrophone: preferredMicrophone,
+            availableMicrophones: availableMicrophones
+        )
+    }
+}
+
+private struct MurmurConfigStore {
+    private let configDirectory: String
+    private let fileManager: FileManager
+
+    private var rewriteModePath: String { "\(configDirectory)/rewrite_mode.txt" }
+    private var openRouterModelPath: String { "\(configDirectory)/openrouter_model.txt" }
+    private var pauseMediaPath: String { "\(configDirectory)/pause_media_while_recording.txt" }
+    private var microphonePath: String { "\(configDirectory)/microphone.txt" }
+
+    init(configDirectory: String, fileManager: FileManager = .default) {
+        self.configDirectory = configDirectory
+        self.fileManager = fileManager
+    }
+
+    func persistRewriteMode(_ mode: TranscriptRewriteMode) throws {
+        try writeValue(mode.rawValue, to: rewriteModePath)
+    }
+
+    func persistOpenRouterModel(_ model: String) throws {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        try writeValue(trimmed, to: openRouterModelPath)
+    }
+
+    func persistPauseMediaWhileRecording(_ enabled: Bool) throws {
+        try writeValue(enabled ? "true" : "false", to: pauseMediaPath)
+    }
+
+    func persistPreferredMicrophone(_ microphone: String?) throws {
+        guard let microphone else {
+            try removeValue(at: microphonePath)
+            return
+        }
+
+        let trimmed = microphone.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try removeValue(at: microphonePath)
+        } else {
+            try writeValue(trimmed, to: microphonePath)
+        }
+    }
+
+    private func ensureConfigDirectory() throws {
+        try fileManager.createDirectory(
+            atPath: configDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+    }
+
+    private func writeValue(_ value: String, to path: String) throws {
+        try ensureConfigDirectory()
+        let payload = "\(value)\n"
+        guard let data = payload.data(using: .utf8) else {
+            return
+        }
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    private func removeValue(at path: String) throws {
+        guard fileManager.fileExists(atPath: path) else {
+            return
+        }
+        try fileManager.removeItem(atPath: path)
+    }
 }
 
 @MainActor
@@ -307,12 +411,15 @@ private final class MenuBarRuntime {
     private let bridge: HotkeySessionBridge
     private let overlayController: RecordingOverlayController
     private let overlayPreviewState: OverlayPreviewState?
+    private let configStore: MurmurConfigStore
+    private var menuConfigSnapshot: MenuBarConfigSnapshot
 
     init(
         menuBarController: MenuBarController,
         model: String,
         pythonBinary: String,
         scriptPath: String,
+        configDirectory: String,
         hotkeyShortcuts: [HotkeyShortcut],
         overlayPreviewState: OverlayPreviewState?,
         rewriteMode: TranscriptRewriteMode,
@@ -331,6 +438,7 @@ private final class MenuBarRuntime {
         )
         let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
         let logger = MenuBarLogger()
+        let configStore = MurmurConfigStore(configDirectory: configDirectory)
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
         let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
@@ -382,6 +490,24 @@ private final class MenuBarRuntime {
         } else {
             logger.log("microphone_selected value=\"system_default\"")
         }
+
+        let availableMicrophones: [AudioInputDevice]
+        do {
+            availableMicrophones = try AudioCapture.availableInputDevices()
+        } catch {
+            availableMicrophones = []
+            logger.log("microphone_enumeration_failed error=\"\(escapeLogValue(error.localizedDescription))\"")
+        }
+
+        let initialMenuConfigSnapshot = MenuBarConfigSnapshot(
+            shortcutIdentifier: primaryShortcut.identifier,
+            rewriteMode: rewriteMode,
+            openRouterModel: openRouterModel,
+            pauseMediaWhileRecording: pauseMediaWhileRecording,
+            preferredMicrophone: preferredMicrophone,
+            availableMicrophones: availableMicrophones
+        )
+
         let orchestrator = SessionOrchestrator(
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
             audioCapture: audioCapture,
@@ -417,6 +543,8 @@ private final class MenuBarRuntime {
         self.hotkeyController = hotkeyController
         self.bridge = bridge
         self.overlayController = overlayController
+        self.configStore = configStore
+        menuConfigSnapshot = initialMenuConfigSnapshot
 
         statusUI.onError = { error in
             guard error == .engineError else {
@@ -428,6 +556,13 @@ private final class MenuBarRuntime {
                 }
             }
         }
+
+        menuBarController.onSettingsAction = { [weak self] action in
+            Task { @MainActor in
+                self?.handleMenuSettingsAction(action)
+            }
+        }
+        menuBarController.setSettings(initialMenuConfigSnapshot.menuSnapshot)
     }
 
     func start() {
@@ -484,6 +619,37 @@ private final class MenuBarRuntime {
             overlayController.stop()
         }
         logger.log("menu_bar_stopped")
+    }
+
+    private func handleMenuSettingsAction(_ action: MenuBarSettingsAction) {
+        do {
+            switch action {
+            case .setRewriteMode(let mode):
+                try configStore.persistRewriteMode(mode)
+                menuConfigSnapshot.rewriteMode = mode
+                logger.log("menu_settings_updated key=rewrite_mode value=\(mode.rawValue)")
+            case .setOpenRouterModel(let model):
+                try configStore.persistOpenRouterModel(model)
+                menuConfigSnapshot.openRouterModel = model
+                logger.log("menu_settings_updated key=openrouter_model value=\"\(escapeLogValue(model))\"")
+            case .setPauseMediaWhileRecording(let enabled):
+                try configStore.persistPauseMediaWhileRecording(enabled)
+                menuConfigSnapshot.pauseMediaWhileRecording = enabled
+                logger.log("menu_settings_updated key=pause_media_while_recording value=\(enabled)")
+            case .setPreferredMicrophone(let microphone):
+                try configStore.persistPreferredMicrophone(microphone)
+                menuConfigSnapshot.preferredMicrophone = microphone
+                if let microphone, !microphone.isEmpty {
+                    logger.log("menu_settings_updated key=microphone value=\"\(escapeLogValue(microphone))\"")
+                } else {
+                    logger.log("menu_settings_updated key=microphone value=\"system_default\"")
+                }
+            }
+
+            menuBarController.setSettings(menuConfigSnapshot.menuSnapshot)
+        } catch {
+            logger.log("menu_settings_update_failed error=\"\(escapeLogValue(error.localizedDescription))\"")
+        }
     }
 }
 

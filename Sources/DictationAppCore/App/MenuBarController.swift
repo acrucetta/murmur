@@ -1,14 +1,50 @@
 #if canImport(AppKit)
 import AppKit
 
+public struct MenuBarSettingsSnapshot {
+    public let shortcutIdentifier: String
+    public let rewriteMode: TranscriptRewriteMode
+    public let openRouterModel: String
+    public let pauseMediaWhileRecording: Bool
+    public let preferredMicrophone: String?
+    public let availableMicrophones: [AudioInputDevice]
+
+    public init(
+        shortcutIdentifier: String,
+        rewriteMode: TranscriptRewriteMode,
+        openRouterModel: String,
+        pauseMediaWhileRecording: Bool,
+        preferredMicrophone: String?,
+        availableMicrophones: [AudioInputDevice]
+    ) {
+        self.shortcutIdentifier = shortcutIdentifier
+        self.rewriteMode = rewriteMode
+        self.openRouterModel = openRouterModel
+        self.pauseMediaWhileRecording = pauseMediaWhileRecording
+        self.preferredMicrophone = preferredMicrophone
+        self.availableMicrophones = availableMicrophones
+    }
+}
+
+public enum MenuBarSettingsAction {
+    case setRewriteMode(TranscriptRewriteMode)
+    case setOpenRouterModel(String)
+    case setPauseMediaWhileRecording(Bool)
+    case setPreferredMicrophone(String?)
+}
+
 @MainActor
 public final class MenuBarController: NSObject {
     private var statusItem: NSStatusItem?
     private var menu: NSMenu?
-    private var stateItem: NSMenuItem?
-    private var backendItem: NSMenuItem?
-    private var errorItem: NSMenuItem?
-    private var partialItem: NSMenuItem?
+    private var shortcutItem: NSMenuItem?
+    private var rewriteModeItem: NSMenuItem?
+    private var modelItem: NSMenuItem?
+    private var pauseMediaItem: NSMenuItem?
+    private var microphoneItem: NSMenuItem?
+    private var settingsSnapshot: MenuBarSettingsSnapshot?
+
+    public var onSettingsAction: ((MenuBarSettingsAction) -> Void)?
 
     public override init() {
         super.init()
@@ -26,40 +62,29 @@ public final class MenuBarController: NSObject {
         setBackend("initializing")
         setLastErrorMessage(nil)
         setPartialTranscript(nil)
+        refreshSettingsMenu()
         scheduleDiagnosticsLog()
     }
 
     public func setState(_ state: SessionState) {
-        stateItem?.title = "State: \(SessionStatePresentation.label(for: state))"
-
-        switch state {
-        case .listening:
-            statusItem?.button?.contentTintColor = .systemRed
-        case .error:
-            statusItem?.button?.contentTintColor = .systemOrange
-        default:
-            statusItem?.button?.contentTintColor = nil
-        }
+        _ = state
     }
 
     public func setBackend(_ backend: String) {
-        backendItem?.title = "Backend: \(backend)"
+        _ = backend
     }
 
     public func setLastErrorMessage(_ message: String?) {
-        if let message, !message.isEmpty {
-            errorItem?.title = "Last Error: \(message)"
-        } else {
-            errorItem?.title = "Last Error: none"
-        }
+        _ = message
     }
 
     public func setPartialTranscript(_ text: String?) {
-        if let text, !text.isEmpty {
-            partialItem?.title = "Partial: \(text)"
-        } else {
-            partialItem?.title = "Partial: -"
-        }
+        _ = text
+    }
+
+    public func setSettings(_ snapshot: MenuBarSettingsSnapshot) {
+        settingsSnapshot = snapshot
+        refreshSettingsMenu()
     }
 
     private func configureButton() {
@@ -101,25 +126,31 @@ public final class MenuBarController: NSObject {
             return
         }
 
-        let stateItem = NSMenuItem(title: "State: -", action: nil, keyEquivalent: "")
-        stateItem.isEnabled = false
-        menu.addItem(stateItem)
-        self.stateItem = stateItem
+        let shortcutItem = NSMenuItem(title: "Shortcut: -", action: nil, keyEquivalent: "")
+        shortcutItem.isEnabled = false
+        menu.addItem(shortcutItem)
+        self.shortcutItem = shortcutItem
 
-        let backendItem = NSMenuItem(title: "Backend: -", action: nil, keyEquivalent: "")
-        backendItem.isEnabled = false
-        menu.addItem(backendItem)
-        self.backendItem = backendItem
+        let rewriteModeItem = NSMenuItem(title: "Rewrite Mode: -", action: nil, keyEquivalent: "")
+        menu.addItem(rewriteModeItem)
+        self.rewriteModeItem = rewriteModeItem
 
-        let errorItem = NSMenuItem(title: "Last Error: -", action: nil, keyEquivalent: "")
-        errorItem.isEnabled = false
-        menu.addItem(errorItem)
-        self.errorItem = errorItem
+        let modelItem = NSMenuItem(title: "Smart Model: -", action: nil, keyEquivalent: "")
+        menu.addItem(modelItem)
+        self.modelItem = modelItem
 
-        let partialItem = NSMenuItem(title: "Partial: -", action: nil, keyEquivalent: "")
-        partialItem.isEnabled = false
-        menu.addItem(partialItem)
-        self.partialItem = partialItem
+        let pauseMediaItem = NSMenuItem(
+            title: "Pause Media While Recording",
+            action: #selector(togglePauseMedia(_:)),
+            keyEquivalent: ""
+        )
+        pauseMediaItem.target = self
+        menu.addItem(pauseMediaItem)
+        self.pauseMediaItem = pauseMediaItem
+
+        let microphoneItem = NSMenuItem(title: "Microphone: -", action: nil, keyEquivalent: "")
+        menu.addItem(microphoneItem)
+        self.microphoneItem = microphoneItem
 
         menu.addItem(NSMenuItem.separator())
 
@@ -128,6 +159,166 @@ public final class MenuBarController: NSObject {
         menu.addItem(quitItem)
 
         statusItem?.menu = menu
+    }
+
+    private func refreshSettingsMenu() {
+        guard let snapshot = settingsSnapshot else {
+            shortcutItem?.title = "Shortcut: -"
+            rewriteModeItem?.title = "Rewrite Mode: -"
+            modelItem?.title = "Smart Model: -"
+            pauseMediaItem?.state = .off
+            pauseMediaItem?.isEnabled = false
+            microphoneItem?.title = "Microphone: -"
+            return
+        }
+
+        shortcutItem?.title = "Shortcut: \(snapshot.shortcutIdentifier)"
+        rewriteModeItem?.title = "Rewrite Mode: \(snapshot.rewriteMode.rawValue)"
+        rewriteModeItem?.submenu = makeRewriteModeSubmenu(snapshot: snapshot)
+        modelItem?.title = "Smart Model: \(snapshot.openRouterModel)"
+        modelItem?.submenu = makeModelSubmenu(snapshot: snapshot)
+        pauseMediaItem?.state = snapshot.pauseMediaWhileRecording ? .on : .off
+        pauseMediaItem?.isEnabled = true
+        microphoneItem?.title = "Microphone: \(displayMicrophoneLabel(for: snapshot))"
+        microphoneItem?.submenu = makeMicrophoneSubmenu(snapshot: snapshot)
+    }
+
+    private func makeRewriteModeSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
+        let submenu = NSMenu(title: "Rewrite Mode")
+
+        let literalItem = NSMenuItem(title: "Literal", action: #selector(selectRewriteMode(_:)), keyEquivalent: "")
+        literalItem.target = self
+        literalItem.tag = 0
+        literalItem.state = snapshot.rewriteMode == .literal ? .on : .off
+        submenu.addItem(literalItem)
+
+        let smartItem = NSMenuItem(title: "Smart", action: #selector(selectRewriteMode(_:)), keyEquivalent: "")
+        smartItem.target = self
+        smartItem.tag = 1
+        smartItem.state = snapshot.rewriteMode == .smart ? .on : .off
+        submenu.addItem(smartItem)
+
+        return submenu
+    }
+
+    private func makeModelSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
+        let submenu = NSMenu(title: "Smart Model")
+        let choices = CLIConfigOptionCatalog.modelChoices(current: snapshot.openRouterModel)
+
+        for choice in choices where choice != CLIConfigOptionCatalog.customEntryLabel {
+            let item = NSMenuItem(title: choice, action: #selector(selectOpenRouterModel(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice
+            item.state = choice == snapshot.openRouterModel ? .on : .off
+            submenu.addItem(item)
+        }
+
+        return submenu
+    }
+
+    private func makeMicrophoneSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
+        let submenu = NSMenu(title: "Microphone")
+        let preferred = snapshot.preferredMicrophone?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isSystemDefaultSelected = preferred == nil || preferred?.isEmpty == true
+        let autoDetectTitle = autoDetectMicrophoneTitle(from: snapshot.availableMicrophones)
+
+        let defaultItem = NSMenuItem(
+            title: autoDetectTitle,
+            action: #selector(selectMicrophone(_:)),
+            keyEquivalent: ""
+        )
+        defaultItem.target = self
+        defaultItem.representedObject = ""
+        defaultItem.state = isSystemDefaultSelected ? .on : .off
+        submenu.addItem(defaultItem)
+
+        var matchedPreferred = isSystemDefaultSelected
+        if snapshot.availableMicrophones.isEmpty {
+            let emptyItem = NSMenuItem(title: "No microphones discovered", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            submenu.addItem(emptyItem)
+        } else {
+            submenu.addItem(NSMenuItem.separator())
+            for device in snapshot.availableMicrophones {
+                let suffix = device.isDefault ? " (default)" : ""
+                let item = NSMenuItem(
+                    title: "\(device.name)\(suffix)",
+                    action: #selector(selectMicrophone(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = device.id
+
+                let isSelected =
+                    preferred == device.id ||
+                    preferred?.compare(device.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                if isSelected {
+                    matchedPreferred = true
+                }
+                item.state = isSelected ? .on : .off
+                submenu.addItem(item)
+            }
+        }
+
+        if !matchedPreferred, let preferred, !preferred.isEmpty {
+            submenu.addItem(NSMenuItem.separator())
+            let unavailable = NSMenuItem(title: "Current (unavailable): \(preferred)", action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            unavailable.state = .on
+            submenu.addItem(unavailable)
+        }
+
+        return submenu
+    }
+
+    private func displayMicrophoneLabel(for snapshot: MenuBarSettingsSnapshot) -> String {
+        guard let preferred = snapshot.preferredMicrophone?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !preferred.isEmpty
+        else {
+            return autoDetectMicrophoneTitle(from: snapshot.availableMicrophones)
+        }
+
+        if let matched = snapshot.availableMicrophones.first(where: {
+            $0.id == preferred ||
+                $0.name.compare(preferred, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) {
+            return matched.name
+        }
+
+        return preferred
+    }
+
+    private func autoDetectMicrophoneTitle(from devices: [AudioInputDevice]) -> String {
+        if let defaultDevice = devices.first(where: { $0.isDefault }) {
+            return "Auto-detect (\(defaultDevice.name))"
+        }
+        return "Auto-detect"
+    }
+
+    @objc private func selectRewriteMode(_ sender: NSMenuItem) {
+        let mode: TranscriptRewriteMode = sender.tag == 1 ? .smart : .literal
+        onSettingsAction?(.setRewriteMode(mode))
+    }
+
+    @objc private func selectOpenRouterModel(_ sender: NSMenuItem) {
+        guard let model = sender.representedObject as? String else {
+            return
+        }
+        onSettingsAction?(.setOpenRouterModel(model))
+    }
+
+    @objc private func togglePauseMedia(_ sender: NSMenuItem) {
+        let current = settingsSnapshot?.pauseMediaWhileRecording ?? false
+        onSettingsAction?(.setPauseMediaWhileRecording(!current))
+    }
+
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        let selected = (sender.representedObject as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let selected, !selected.isEmpty {
+            onSettingsAction?(.setPreferredMicrophone(selected))
+        } else {
+            onSettingsAction?(.setPreferredMicrophone(nil))
+        }
     }
 
     @objc private func quitPressed(_ sender: Any?) {
