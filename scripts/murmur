@@ -12,6 +12,7 @@ REWRITE_MODE_FILE="$CONFIG_DIR/rewrite_mode.txt"
 OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
 OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
 PAUSE_MEDIA_FILE="$CONFIG_DIR/pause_media_while_recording.txt"
+MICROPHONE_FILE="$CONFIG_DIR/microphone.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
 DEFAULT_REWRITE_MODE="literal"
 DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
@@ -22,12 +23,13 @@ usage() {
   cat <<USAGE
 Usage:
   ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
-  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
-  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
+  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
   ${COMMAND_NAME} stop
   ${COMMAND_NAME} logs
+  ${COMMAND_NAME} microphones
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--api-key <token>] [--clear-api-key]
+  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} uninstall
 
@@ -37,6 +39,7 @@ Commands:
   start      run in background
   stop       stop background process
   logs       tail background log
+  microphones list available input microphones
   config     interactive TUI config wizard
   doctor     print effective runtime config and health
   uninstall  remove global CLI link
@@ -249,6 +252,36 @@ pause_media_source() {
   printf '%s\n' "default"
 }
 
+resolve_microphone() {
+  local env_value="${MURMUR_MICROPHONE:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return
+  fi
+
+  local file_value
+  file_value="$(read_file_value "$MICROPHONE_FILE" || true)"
+  if [[ -n "$file_value" ]]; then
+    printf '%s\n' "$file_value"
+    return
+  fi
+}
+
+microphone_source() {
+  local env_value="${MURMUR_MICROPHONE:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "env:MURMUR_MICROPHONE"
+    return
+  fi
+  if [[ -f "$MICROPHONE_FILE" ]]; then
+    printf '%s\n' "file:$MICROPHONE_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
 resolve_openrouter_model() {
   local env_model="${MURMUR_OPENROUTER_MODEL:-}"
   env_model="$(trim "$env_model")"
@@ -367,7 +400,7 @@ ensure_interactive_tty() {
   if [[ -t 0 && -t 1 ]]; then
     return 0
   fi
-  echo "interactive config requires a TTY. use '${COMMAND_NAME} config set --mode/--shortcut/...' in non-interactive contexts." >&2
+  echo "interactive config requires a TTY. use '${COMMAND_NAME} config set --mode/--shortcut/--microphone/...' in non-interactive contexts." >&2
   return 2
 }
 
@@ -378,6 +411,15 @@ write_shortcut_value() {
 
 clear_shortcut_value() {
   rm -f "$SHORTCUT_FILE"
+}
+
+write_microphone_value() {
+  local microphone="$1"
+  write_config_value "$MICROPHONE_FILE" "$microphone"
+}
+
+clear_microphone_value() {
+  rm -f "$MICROPHONE_FILE"
 }
 
 config_usage() {
@@ -391,6 +433,8 @@ examples:
   ${COMMAND_NAME} config set --reset-shortcut
   ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
   ${COMMAND_NAME} config set --pause-media true
+  ${COMMAND_NAME} config set --microphone "MacBook Pro Microphone"
+  ${COMMAND_NAME} config set --reset-microphone
   ${COMMAND_NAME} config set --api-key sk-or-...
   ${COMMAND_NAME} config set --clear-api-key
 USAGE
@@ -401,6 +445,14 @@ config_get() {
   echo "rewrite_mode_source=$(rewrite_mode_source)"
   echo "pause_media_while_recording=$(resolve_pause_media_while_recording)"
   echo "pause_media_while_recording_source=$(pause_media_source)"
+  local microphone_value
+  microphone_value="$(resolve_microphone || true)"
+  if [[ -n "$microphone_value" ]]; then
+    echo "microphone=$microphone_value"
+  else
+    echo "microphone=system_default"
+  fi
+  echo "microphone_source=$(microphone_source)"
   echo "openrouter_model=$(resolve_openrouter_model)"
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"
@@ -436,7 +488,7 @@ config_set_interactive() {
 }
 
 config_set_non_interactive() {
-  local mode="" model="" pause_media="" api_key="" shortcut="" clear_api_key=0 reset_shortcut=0
+  local mode="" model="" pause_media="" api_key="" shortcut="" microphone="" clear_api_key=0 reset_shortcut=0 reset_microphone=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -480,8 +532,20 @@ config_set_non_interactive() {
         shortcut="$2"
         shift 2
         ;;
+      --microphone)
+        if [[ $# -lt 2 ]]; then
+          echo "--microphone requires a value" >&2
+          return 2
+        fi
+        microphone="$2"
+        shift 2
+        ;;
       --reset-shortcut)
         reset_shortcut=1
+        shift
+        ;;
+      --reset-microphone)
+        reset_microphone=1
         shift
         ;;
       --clear-api-key)
@@ -505,7 +569,12 @@ config_set_non_interactive() {
     return 2
   fi
 
-  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 ]]; then
+  if [[ "$reset_microphone" -eq 1 && -n "$(trim "$microphone")" ]]; then
+    echo "--microphone and --reset-microphone cannot be used together" >&2
+    return 2
+  fi
+
+  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && -z "$microphone" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 && "$reset_microphone" -eq 0 ]]; then
     config_set_interactive
     return $?
   fi
@@ -542,8 +611,17 @@ config_set_non_interactive() {
     write_shortcut_value "$shortcut"
   fi
 
+  microphone="$(trim "$microphone")"
+  if [[ -n "$microphone" ]]; then
+    write_microphone_value "$microphone"
+  fi
+
   if [[ "$reset_shortcut" -eq 1 ]]; then
     clear_shortcut_value
+  fi
+
+  if [[ "$reset_microphone" -eq 1 ]]; then
+    clear_microphone_value
   fi
 
   if [[ "$clear_api_key" -eq 1 ]]; then
@@ -634,14 +712,19 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local microphone_args=()
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
   pause_media_while_recording="$(resolve_pause_media_while_recording)"
+  microphone_identifier="$(resolve_microphone || true)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
+  if [[ -n "$microphone_identifier" ]]; then
+    microphone_args=(--microphone "$microphone_identifier")
+  fi
 
   ensure_build
   (
@@ -654,6 +737,7 @@ start_bg() {
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
+        "${microphone_args[@]}" \
         "$@" >"$LOG_FILE" 2>&1 &
     else
       nohup "$APP_BIN" \
@@ -663,6 +747,7 @@ start_bg() {
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
+        "${microphone_args[@]}" \
         "$@" >"$LOG_FILE" 2>&1 &
     fi
     echo $! >"$PID_FILE"
@@ -679,14 +764,19 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local microphone_args=()
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
   pause_media_while_recording="$(resolve_pause_media_while_recording)"
+  microphone_identifier="$(resolve_microphone || true)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
+  if [[ -n "$microphone_identifier" ]]; then
+    microphone_args=(--microphone "$microphone_identifier")
+  fi
 
   ensure_build
   cd "$ROOT_DIR"
@@ -698,6 +788,7 @@ run_fg() {
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
+      "${microphone_args[@]}" \
       "$@"
   else
     exec "$APP_BIN" \
@@ -707,6 +798,7 @@ run_fg() {
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
+      "${microphone_args[@]}" \
       "$@"
   fi
 }
@@ -735,6 +827,14 @@ doctor() {
   echo "rewrite_mode_source=$(rewrite_mode_source)"
   echo "pause_media_while_recording=$(resolve_pause_media_while_recording)"
   echo "pause_media_while_recording_source=$(pause_media_source)"
+  local microphone_value
+  microphone_value="$(resolve_microphone || true)"
+  if [[ -n "$microphone_value" ]]; then
+    echo "microphone=$microphone_value"
+  else
+    echo "microphone=system_default"
+  fi
+  echo "microphone_source=$(microphone_source)"
   echo "openrouter_model=$(resolve_openrouter_model)"
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"
@@ -745,6 +845,11 @@ doctor() {
   else
     echo "status=stopped"
   fi
+}
+
+list_microphones() {
+  ensure_capture_build
+  "$ROOT_DIR/.build/debug/DictationPreviewCLI" --list-microphones
 }
 
 setup_environment() {
@@ -943,6 +1048,9 @@ stop)
 logs)
   touch "$LOG_FILE"
   tail -f "$LOG_FILE"
+  ;;
+microphones)
+  list_microphones
   ;;
 config)
   config_command "$@"

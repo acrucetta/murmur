@@ -18,6 +18,10 @@ public final class SessionOrchestrator {
     private let logger: Logging
     private let now: NowProvider
     private var releaseTimestamp: Date?
+    private var capturedFrameCount = 0
+    private var capturedSampleCount = 0
+    private var capturedRMSAccumulator: Double = 0
+    private var capturedPeakRMS: Float = 0
 
     public private(set) var state: SessionState = .idle {
         didSet {
@@ -76,7 +80,8 @@ public final class SessionOrchestrator {
                 } else if asrEngine.providesFinalTranscriptOnStop {
                     statusUI.showError(.engineError)
                     state = .error(.engineError)
-                    logger.log("engine finalize failed: no transcript produced")
+                    let reason = engineFinalizeFailureReason()
+                    logger.log("engine finalize failed: no transcript produced\(reason)\(captureDiagnosticsSummary())")
                 }
             }
         case .audioFrame(let audioFrame):
@@ -84,6 +89,7 @@ public final class SessionOrchestrator {
                 return
             }
             asrEngine.consume(audioFrame)
+            recordAudioCaptureDiagnostics(for: audioFrame)
         case .partialTranscript(let partialTranscript):
             guard state == .listening else {
                 return
@@ -95,10 +101,18 @@ public final class SessionOrchestrator {
                 logReleaseToFinalLatencyIfPossible()
                 let cleaned = postProcessor.clean(finalTranscript.text)
                 let rewriteContext = rewriteContextProvider.currentContext()
+                logRewriteInput(cleaned, mode: rewriteContext.mode)
                 let rewritten = transcriptRewriter
                     .rewrite(cleaned, context: rewriteContext)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let textToInsert = rewritten.flatMap { $0.isEmpty ? nil : $0 } ?? cleaned
+                let textToInsert: String
+                if let rewritten, !rewritten.isEmpty {
+                    logRewriteOutput(rewritten, source: "llm", changed: rewritten != cleaned)
+                    textToInsert = rewritten
+                } else {
+                    logRewriteOutput(cleaned, source: "original", changed: false)
+                    textToInsert = cleaned
+                }
                 logInsertTextPreview(textToInsert)
                 let insertResult = fieldWriter.insert(textToInsert)
                 logInsertResult(insertResult)
@@ -126,6 +140,10 @@ public final class SessionOrchestrator {
     }
 
     private func handleShortcutPressed(_ event: SessionEvent) {
+        if state == .listening {
+            return
+        }
+
         if isErrorState(state) {
             transition(.reset)
         }
@@ -143,8 +161,9 @@ public final class SessionOrchestrator {
         transition(event)
         if state == .listening {
             recordingMediaController.pauseMediaForRecording()
-            audioCapture.start()
+            resetCaptureDiagnostics()
             asrEngine.start()
+            audioCapture.start()
             feedback.recordingDidStart()
         }
     }
@@ -183,6 +202,17 @@ public final class SessionOrchestrator {
         logger.log("insert_text chars=\(text.count) preview=\"\(preview)\"")
     }
 
+    private func logRewriteInput(_ text: String, mode: String) {
+        let modePreview = escapedPreview(for: mode, maxLength: 32)
+        let textPreview = escapedPreview(for: text, maxLength: 200)
+        logger.log("rewrite_input mode=\"\(modePreview)\" chars=\(text.count) preview=\"\(textPreview)\"")
+    }
+
+    private func logRewriteOutput(_ text: String, source: String, changed: Bool) {
+        let textPreview = escapedPreview(for: text, maxLength: 200)
+        logger.log("rewrite_output source=\(source) changed=\(changed) chars=\(text.count) preview=\"\(textPreview)\"")
+    }
+
     private func logInsertResult(_ result: InsertResult) {
         let code = result.error?.rawValue ?? "none"
         logger.log("insert_result success=\(result.success) method=\(result.method.rawValue) code=\(code)")
@@ -199,6 +229,79 @@ public final class SessionOrchestrator {
             return escaped
         }
         return String(escaped.prefix(maxLength)) + "..."
+    }
+
+    private func engineFinalizeFailureReason() -> String {
+        if let moonshineEngine = asrEngine as? MoonshineProcessASREngine,
+           let lastError = moonshineEngine.lastError
+        {
+            return " reason=\(lastError)"
+        }
+        return ""
+    }
+
+    private func recordAudioCaptureDiagnostics(for frame: AudioFrame) {
+        capturedFrameCount += 1
+        capturedSampleCount += frame.samples.count
+
+        guard !frame.samples.isEmpty else {
+            return
+        }
+
+        var squareSum: Double = 0
+        var peak: Float = 0
+        for sample in frame.samples {
+            let absolute = Swift.abs(sample)
+            peak = max(peak, absolute)
+            let sampleDouble = Double(sample)
+            squareSum += sampleDouble * sampleDouble
+        }
+
+        let rms = sqrt(squareSum / Double(frame.samples.count))
+        capturedRMSAccumulator += rms
+        capturedPeakRMS = max(capturedPeakRMS, peak)
+    }
+
+    private func captureDiagnosticsSummary() -> String {
+        let averageRMS: Double
+        if capturedFrameCount > 0 {
+            averageRMS = capturedRMSAccumulator / Double(capturedFrameCount)
+        } else {
+            averageRMS = 0
+        }
+        let quality = captureQualityLabel()
+
+        return " captured_frames=\(capturedFrameCount)" +
+            " captured_samples=\(capturedSampleCount)" +
+            " captured_avg_rms=\(formatCaptureValue(averageRMS))" +
+            " captured_peak_rms=\(formatCaptureValue(Double(capturedPeakRMS)))" +
+            " captured_quality=\(quality)"
+    }
+
+    private func formatCaptureValue(_ value: Double) -> String {
+        String(format: "%.5f", value)
+    }
+
+    private func resetCaptureDiagnostics() {
+        capturedFrameCount = 0
+        capturedSampleCount = 0
+        capturedRMSAccumulator = 0
+        capturedPeakRMS = 0
+    }
+
+    private func captureQualityLabel() -> String {
+        guard capturedFrameCount > 0 else {
+            return "none"
+        }
+
+        switch capturedPeakRMS {
+        case ..<0.01:
+            return "very_low"
+        case ..<0.03:
+            return "low"
+        default:
+            return "ok"
+        }
     }
 
     private func isErrorState(_ state: SessionState) -> Bool {

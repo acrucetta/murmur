@@ -78,6 +78,12 @@ struct SessionOrchestratorTests {
         #expect(history.entries.first?.transcript == "Hello world.")
         #expect(history.entries.first?.insertResult.method == .accessibilityDirect)
         #expect(history.entries.first?.insertResult.success == true)
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("rewrite_input mode=\"literal\" chars=12 preview=\"Hello world.\"")
+        }))
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("rewrite_output source=original changed=false chars=12 preview=\"Hello world.\"")
+        }))
         #expect(logger.messages.contains(where: { $0.hasPrefix("insert_text chars=12 preview=\"Hello world.\"") }))
         #expect(logger.messages.contains("insert_result success=true method=accessibility_direct code=none"))
         #expect(logger.messages.contains("release_to_final_ms=300"))
@@ -138,6 +144,67 @@ struct SessionOrchestratorTests {
     }
 
     @Test
+    func moonshineFailureLogsConcreteReason() {
+        let asr = MoonshineProcessASREngine(
+            command: ["python3", "scripts/moonshine_transcribe.py"],
+            runCommand: { _, _ in "unused" }
+        )
+        let logger = LoggerSpy()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(logger.messages.contains(where: {
+            $0.contains("engine finalize failed: no transcript produced reason=missingAudio") &&
+                $0.contains("captured_frames=0") &&
+                $0.contains("captured_quality=none")
+        }))
+        #expect(orchestrator.state == .error(.engineError))
+    }
+
+    @Test
+    func moonshineFailureLogsCaptureDiagnosticsWhenAudioWasCaptured() {
+        let asr = MoonshineProcessASREngine(
+            command: ["python3", "scripts/moonshine_transcribe.py"],
+            runCommand: { _, _ in throw MoonshineProcessASREngine.EngineError.commandFailed("onnx: empty transcription") }
+        )
+        let logger = LoggerSpy()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.audioFrame(.init(samples: [0.5, -0.5], sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(logger.messages.contains(where: {
+            $0.contains("reason=commandFailed(\"onnx: empty transcription\")") &&
+                $0.contains("captured_frames=1") &&
+                $0.contains("captured_samples=2") &&
+                $0.contains("captured_peak_rms=0.50000") &&
+                $0.contains("captured_quality=ok")
+        }))
+        #expect(orchestrator.state == .error(.engineError))
+    }
+
+    @Test
     func pressAfterEngineErrorRecoversToListening() {
         let asr = FakeASREngine()
         asr.providesFinalTranscriptOnStopValue = true
@@ -187,6 +254,70 @@ struct SessionOrchestratorTests {
 
         #expect(writer.insertCallCount == 1)
         #expect(writer.lastInsertedText == "Moonshine live final.")
+        #expect(orchestrator.state == .idle)
+    }
+
+    @Test
+    func synchronousAudioFrameDuringStartIsRetainedForFinalization() {
+        let audio = FakeAudioCapture()
+        let asr = MoonshineProcessASREngine(
+            command: ["python3", "scripts/moonshine_transcribe.py"],
+            runCommand: { _, _ in "live transcript" }
+        )
+        let writer = FakeFieldWriter()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: audio,
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: NoopLogger()
+        )
+
+        audio.onStart = {
+            orchestrator.handle(.audioFrame(.init(samples: [0.09, 0.02, -0.01], sampleRate: 16_000, channels: 1)))
+        }
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(writer.insertCallCount == 1)
+        #expect(writer.lastInsertedText == "Live transcript.")
+        #expect(orchestrator.state == .idle)
+    }
+
+    @Test
+    func duplicateShortcutPressWhileListeningDoesNotResetASREngineBuffer() {
+        let audio = FakeAudioCapture()
+        let asr = MoonshineProcessASREngine(
+            command: ["python3", "scripts/moonshine_transcribe.py"],
+            runCommand: { _, _ in "duplicate press stable" }
+        )
+        let writer = FakeFieldWriter()
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: audio,
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: NoopLogger()
+        )
+
+        audio.onStart = {
+            orchestrator.handle(.audioFrame(.init(samples: [0.03, 0.07, 0.01], sampleRate: 16_000, channels: 1)))
+        }
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date().addingTimeInterval(0.05))))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date().addingTimeInterval(0.10))))
+
+        #expect(audio.startCallCount == 1)
+        #expect(writer.insertCallCount == 1)
+        #expect(writer.lastInsertedText == "Duplicate press stable.")
         #expect(orchestrator.state == .idle)
     }
 
@@ -294,6 +425,7 @@ struct SessionOrchestratorTests {
         asr.nextFinalTranscript = .init(text: "ship tomorrow", confidence: 0.8)
         let writer = FakeFieldWriter()
         let rewriter = RewriteSpy(nextResult: "Ship on Friday.")
+        let logger = LoggerSpy()
         let contextProvider = FixedRewriteContextProvider(
             context: .init(
                 frontmostAppBundleID: "com.apple.mail",
@@ -311,7 +443,7 @@ struct SessionOrchestratorTests {
             rewriteContextProvider: contextProvider,
             fieldWriter: writer,
             statusUI: StatusUISpy(),
-            logger: NoopLogger()
+            logger: logger
         )
 
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
@@ -322,6 +454,12 @@ struct SessionOrchestratorTests {
         #expect(rewriter.lastContext?.frontmostAppBundleID == "com.apple.mail")
         #expect(rewriter.lastContext?.mode == "smart")
         #expect(writer.lastInsertedText == "Ship on Friday.")
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("rewrite_input mode=\"smart\" chars=14 preview=\"Ship tomorrow.\"")
+        }))
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("rewrite_output source=llm changed=true chars=15 preview=\"Ship on Friday.\"")
+        }))
     }
 
     @Test
@@ -369,9 +507,11 @@ private final class FakePermissionManager: PermissionManaging {
 private final class FakeAudioCapture: AudioCapturing {
     var startCallCount = 0
     var stopCallCount = 0
+    var onStart: (() -> Void)?
 
     func start() {
         startCallCount += 1
+        onStart?()
     }
 
     func stop() {

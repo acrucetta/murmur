@@ -19,11 +19,18 @@ private enum TermKitAPIKeySelection {
     case clear
 }
 
+private enum TermKitMicrophoneSelection {
+    case keep
+    case set(String)
+    case reset
+}
+
 private struct TermKitConfigState {
     let currentShortcut: String
     let currentRewriteMode: String
     let currentModel: String
     let currentPauseMediaWhileRecording: Bool
+    let currentMicrophone: String?
     let apiKeyStored: Bool
     let apiKeySource: String
 }
@@ -39,6 +46,7 @@ private struct TermKitConfigStore {
     private var rewriteModePath: String { "\(configDir)/rewrite_mode.txt" }
     private var modelPath: String { "\(configDir)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDir)/pause_media_while_recording.txt" }
+    private var microphonePath: String { "\(configDir)/microphone.txt" }
     private var apiKeyPath: String { "\(configDir)/openrouter_api_key.txt" }
 
     func load() -> TermKitConfigState {
@@ -48,6 +56,7 @@ private struct TermKitConfigStore {
             ?? "smart"
         let model = readValue(path: modelPath) ?? defaultOpenRouterModel
         let pauseMediaWhileRecording = normalizeBoolean(readValue(path: pauseMediaPath)) ?? defaultPauseMediaWhileRecording
+        let microphone = readValue(path: microphonePath)
         let apiKeyStored = (readValue(path: apiKeyPath) ?? "").isEmpty == false
         let apiKeySource = apiKeyStored ? "file:\(apiKeyPath)" : "unset"
 
@@ -56,6 +65,7 @@ private struct TermKitConfigStore {
             currentRewriteMode: rewriteMode,
             currentModel: model,
             currentPauseMediaWhileRecording: pauseMediaWhileRecording,
+            currentMicrophone: microphone,
             apiKeyStored: apiKeyStored,
             apiKeySource: apiKeySource
         )
@@ -66,6 +76,7 @@ private struct TermKitConfigStore {
         rewriteMode: String,
         openRouterModel: String?,
         pauseMediaWhileRecording: Bool,
+        microphone: TermKitMicrophoneSelection,
         apiKey: TermKitAPIKeySelection
     ) throws {
         try ensureConfigDir()
@@ -83,6 +94,15 @@ private struct TermKitConfigStore {
             try writeValue(path: shortcutPath, value: value)
         case .reset:
             try removeFile(path: shortcutPath)
+        }
+
+        switch microphone {
+        case .keep:
+            break
+        case .set(let value):
+            try writeValue(path: microphonePath, value: value)
+        case .reset:
+            try removeFile(path: microphonePath)
         }
 
         switch apiKey {
@@ -196,6 +216,7 @@ private final class TermKitConfigWizardApp {
     private let initialState: TermKitConfigState
 
     private var shortcutSelection: TermKitShortcutSelection = .keep
+    private var microphoneSelection: TermKitMicrophoneSelection = .keep
     private var rewriteMode: String
     private var selectedModel: String
     private var pauseMediaWhileRecording: Bool
@@ -203,6 +224,7 @@ private final class TermKitConfigWizardApp {
     private let rewriteModeValueLabel = Label("")
     private let modelValueLabel = Label("")
     private let hotkeyValueLabel = Label("")
+    private let microphoneValueLabel = Label("")
     private let pauseMediaValueLabel = Label("")
     private let apiKeySourceLabel = Label("")
     private let apiKeyField = TextField("")
@@ -302,9 +324,25 @@ private final class TermKitConfigWizardApp {
             self.chooseHotkey()
         }
 
+        let microphoneTitle = Label("Microphone input:")
+        microphoneTitle.x = Pos.at(2)
+        microphoneTitle.y = Pos.at(17)
+
+        microphoneValueLabel.x = Pos.at(24)
+        microphoneValueLabel.y = Pos.top(of: microphoneTitle)
+        microphoneValueLabel.width = Dim.sized(42)
+
+        let microphoneButton = Button("_Choose")
+        microphoneButton.colorScheme = theme.actionButton
+        microphoneButton.x = Pos.right(of: microphoneValueLabel) + 1
+        microphoneButton.y = Pos.top(of: microphoneTitle)
+        microphoneButton.clicked = { _ in
+            self.chooseMicrophone()
+        }
+
         let pauseMediaTitle = Label("Pause media while recording:")
         pauseMediaTitle.x = Pos.at(2)
-        pauseMediaTitle.y = Pos.at(17)
+        pauseMediaTitle.y = Pos.at(19)
 
         pauseMediaValueLabel.x = Pos.at(32)
         pauseMediaValueLabel.y = Pos.top(of: pauseMediaTitle)
@@ -320,26 +358,26 @@ private final class TermKitConfigWizardApp {
 
         let apiKeyTitle = Label("OpenRouter API key (leave blank to keep current):")
         apiKeyTitle.x = Pos.at(2)
-        apiKeyTitle.y = Pos.at(19)
+        apiKeyTitle.y = Pos.at(21)
 
         apiKeySourceLabel.x = Pos.at(2)
-        apiKeySourceLabel.y = Pos.at(20)
+        apiKeySourceLabel.y = Pos.at(22)
 
         apiKeyField.x = Pos.at(2)
-        apiKeyField.y = Pos.at(21)
+        apiKeyField.y = Pos.at(23)
         apiKeyField.width = Dim.sized(72)
         apiKeyField.secret = true
         apiKeyField.colorScheme = theme.textInput
 
         clearAPIKeyCheckbox.x = Pos.at(2)
-        clearAPIKeyCheckbox.y = Pos.at(22)
+        clearAPIKeyCheckbox.y = Pos.at(24)
         clearAPIKeyCheckbox.colorScheme = theme.actionButton
 
         let saveButton = Button("_Save")
         saveButton.isDefault = true
         saveButton.colorScheme = theme.actionButton
         saveButton.x = Pos.at(2)
-        saveButton.y = Pos.at(23)
+        saveButton.y = Pos.at(25)
         saveButton.clicked = { _ in
             self.saveAndExit()
         }
@@ -365,6 +403,9 @@ private final class TermKitConfigWizardApp {
             hotkeyTitle,
             hotkeyValueLabel,
             hotkeyButton,
+            microphoneTitle,
+            microphoneValueLabel,
+            microphoneButton,
             pauseMediaTitle,
             pauseMediaValueLabel,
             pauseMediaButton,
@@ -490,6 +531,34 @@ private final class TermKitConfigWizardApp {
         }
     }
 
+    private func chooseMicrophone() {
+        let availableDevices = (try? AudioCapture.availableInputDevices()) ?? []
+        var options: [String] = [
+            "Keep current (\(resolvedMicrophoneValue()))",
+            "Reset to system default"
+        ]
+        var optionSelections: [TermKitMicrophoneSelection] = [
+            .keep,
+            .reset
+        ]
+
+        for device in availableDevices {
+            let defaultSuffix = device.isDefault ? " (default)" : ""
+            options.append("\(device.name)\(defaultSuffix) [\(device.id)]")
+            optionSelections.append(.set(device.id))
+        }
+
+        presentSelectionDialog(
+            title: "Microphone Input",
+            options: options,
+            selectedIndex: 0
+        ) { index in
+            self.microphoneSelection = optionSelections[index]
+            self.refreshLabels()
+            return nil
+        }
+    }
+
     private func resolvedHotkeyValue() -> String {
         switch shortcutSelection {
         case .keep:
@@ -499,6 +568,21 @@ private final class TermKitConfigWizardApp {
         case .reset:
             return store.defaultShortcut
         }
+    }
+
+    private func resolvedMicrophoneRawValue() -> String? {
+        switch microphoneSelection {
+        case .keep:
+            return initialState.currentMicrophone
+        case .set(let value):
+            return value
+        case .reset:
+            return nil
+        }
+    }
+
+    private func resolvedMicrophoneValue() -> String {
+        resolvedMicrophoneRawValue() ?? "system default"
     }
 
     private func refreshLabels() {
@@ -518,6 +602,7 @@ private final class TermKitConfigWizardApp {
             hotkeyValueLabel.text = "default (\(store.defaultShortcut))"
         }
 
+        microphoneValueLabel.text = resolvedMicrophoneValue()
         pauseMediaValueLabel.text = pauseMediaWhileRecording ? "enabled" : "disabled"
         apiKeySourceLabel.text = "Current key source: \(initialState.apiKeySource)"
     }
@@ -550,6 +635,7 @@ private final class TermKitConfigWizardApp {
                 rewriteMode: rewriteMode,
                 openRouterModel: rewriteMode == "smart" ? selectedModel : nil,
                 pauseMediaWhileRecording: pauseMediaWhileRecording,
+                microphone: microphoneSelection,
                 apiKey: apiKeyAction
             )
             Application.shutdown(statusCode: 0)

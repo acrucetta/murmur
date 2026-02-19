@@ -4,6 +4,14 @@ import Foundation
 import AppKit
 import DictationAppCore
 
+private func escapeLogValue(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
+        .replacingOccurrences(of: "\r", with: "\\r")
+}
+
 @main
 struct MurmurMenuBarApp {
     static func main() {
@@ -20,6 +28,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.pauseMediaWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.microphoneWarning {
+            emit("warning=\(warning)")
+        }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
@@ -31,7 +42,8 @@ struct MurmurMenuBarApp {
             rewriteMode: arguments.rewriteMode,
             openRouterModel: arguments.openRouterModel,
             openRouterAPIKey: arguments.openRouterAPIKey,
-            pauseMediaWhileRecording: arguments.pauseMediaWhileRecording
+            pauseMediaWhileRecording: arguments.pauseMediaWhileRecording,
+            preferredMicrophone: arguments.preferredMicrophone
         )
 
         let delegate = AppDelegate(
@@ -65,6 +77,8 @@ private struct Arguments {
     let rewriteWarning: String?
     let pauseMediaWhileRecording: Bool
     let pauseMediaWarning: String?
+    let preferredMicrophone: String?
+    let microphoneWarning: String?
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         let currentDirectory = FileManager.default.currentDirectoryPath
@@ -80,6 +94,10 @@ private struct Arguments {
         )
         let pauseMediaResolution = resolvePauseMediaWhileRecording(
             explicit: value(after: "--pause-media-while-recording", in: rawArgs),
+            environment: environment
+        )
+        let microphoneResolution = resolvePreferredMicrophone(
+            explicit: value(after: "--microphone", in: rawArgs),
             environment: environment
         )
 
@@ -104,7 +122,9 @@ private struct Arguments {
             openRouterAPIKey: resolveOpenRouterAPIKey(explicit: value(after: "--openrouter-api-key", in: rawArgs), environment: environment),
             rewriteWarning: rewriteResolution.warning,
             pauseMediaWhileRecording: pauseMediaResolution.enabled,
-            pauseMediaWarning: pauseMediaResolution.warning
+            pauseMediaWarning: pauseMediaResolution.warning,
+            preferredMicrophone: microphoneResolution.microphone,
+            microphoneWarning: microphoneResolution.warning
         )
     }
 
@@ -236,6 +256,28 @@ private struct Arguments {
         return (false, nil)
     }
 
+    private static func resolvePreferredMicrophone(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (microphone: String?, warning: String?) {
+        if let explicit {
+            let trimmed = explicit.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return (trimmed, nil)
+            }
+            return (nil, nil)
+        }
+
+        if let envValue = environment["MURMUR_MICROPHONE"] {
+            let trimmed = envValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return (trimmed, nil)
+            }
+        }
+
+        return (nil, nil)
+    }
+
     private static func parseBool(_ rawValue: String) -> Bool? {
         let normalized = rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -276,7 +318,8 @@ private final class MenuBarRuntime {
         rewriteMode: TranscriptRewriteMode,
         openRouterModel: String,
         openRouterAPIKey: String?,
-        pauseMediaWhileRecording: Bool
+        pauseMediaWhileRecording: Bool,
+        preferredMicrophone: String?
     ) {
         self.menuBarController = menuBarController
         self.overlayPreviewState = overlayPreviewState
@@ -288,7 +331,7 @@ private final class MenuBarRuntime {
         )
         let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
         let logger = MenuBarLogger()
-        let audioCapture = AudioCapture()
+        let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
         let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
@@ -333,6 +376,11 @@ private final class MenuBarRuntime {
         } else {
             recordingMediaController = NoopRecordingMediaController()
             logger.log("pause_media_while_recording enabled=false")
+        }
+        if let preferredMicrophone {
+            logger.log("microphone_selected value=\"\(escapeLogValue(preferredMicrophone))\"")
+        } else {
+            logger.log("microphone_selected value=\"system_default\"")
         }
         let orchestrator = SessionOrchestrator(
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
@@ -396,6 +444,7 @@ private final class MenuBarRuntime {
             }
         }
         audioCapture.onError = { error in
+            logger.log("audio_capture_error error=\"\(escapeLogValue(error.localizedDescription))\"")
             Task { @MainActor in
                 menuBarController.setLastErrorMessage("audio: \(error.localizedDescription)")
             }

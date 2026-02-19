@@ -79,6 +79,19 @@ def _infer_voice_arch_and_language(
     return "medium-streaming", language
 
 
+def _infer_onnx_model(model_hint: str) -> str:
+    model_key = model_hint.strip().lower().split("/")[-1]
+    if model_key.endswith("-en"):
+        model_key = model_key[: -len("-en")]
+
+    if "tiny" in model_key:
+        return "moonshine/tiny"
+    if "base" in model_key:
+        return "moonshine/base"
+    # moonshine_onnx currently supports tiny/base families only.
+    return "moonshine/base"
+
+
 def _transcribe_with_moonshine_voice(args: argparse.Namespace) -> str:
     from moonshine_voice import string_to_model_arch
     from moonshine_voice.download import (
@@ -137,7 +150,8 @@ def _transcribe_with_moonshine_voice(args: argparse.Namespace) -> str:
 def _transcribe_with_moonshine_onnx(args: argparse.Namespace) -> str:
     import moonshine_onnx
 
-    result = moonshine_onnx.transcribe(str(args.wav_path), args.model)
+    onnx_model = _infer_onnx_model(args.model)
+    result = moonshine_onnx.transcribe(str(args.wav_path), onnx_model)
     if isinstance(result, (list, tuple)):
         text = " ".join(str(item).strip() for item in result if str(item).strip())
     else:

@@ -20,10 +20,18 @@ struct DictationPreviewCLI {
             runSimulatedPreview(transcript: transcript)
         case .moonshineWAV(let wavPath, let model, let pythonBinary, let scriptPath):
             runMoonshinePreview(wavPath: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
-        case .moonshineLive(let model, let pythonBinary, let scriptPath):
-            runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
-        case .hotkeyDaemon(let model, let pythonBinary, let scriptPath, let shortcutIdentifier):
-            runHotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier)
+        case .moonshineLive(let model, let pythonBinary, let scriptPath, let microphone):
+            runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, microphone: microphone)
+        case .hotkeyDaemon(let model, let pythonBinary, let scriptPath, let shortcutIdentifier, let microphone):
+            runHotkeyDaemon(
+                model: model,
+                pythonBinary: pythonBinary,
+                scriptPath: scriptPath,
+                shortcutIdentifier: shortcutIdentifier,
+                microphone: microphone
+            )
+        case .listMicrophones:
+            runListMicrophones()
         case .captureShortcut:
             runCaptureShortcut()
         case .configWizard(
@@ -104,12 +112,36 @@ struct DictationPreviewCLI {
         emit("Moonshine preview end")
     }
 
-    private static func runMoonshineLivePreview(model: String, pythonBinary: String, scriptPath: String) {
+    private static func runListMicrophones() {
+        do {
+            let devices = try AudioCapture.availableInputDevices()
+            if devices.isEmpty {
+                emit("microphones=none")
+                return
+            }
+
+            for device in devices {
+                emit(
+                    "microphone id=\"\(escapedLogValue(device.id))\" name=\"\(escapedLogValue(device.name))\" default=\(device.isDefault)"
+                )
+            }
+        } catch {
+            emit("error=list_microphones_failed")
+            emit("details=\(error)")
+        }
+    }
+
+    private static func runMoonshineLivePreview(
+        model: String,
+        pythonBinary: String,
+        scriptPath: String,
+        microphone: String?
+    ) {
         let statusUI = ConsoleStatusUI()
         let writer = RecordingFieldWriter(base: FocusedFieldWriter())
         let logger = ConsoleLogger()
         let meter = LiveCaptureMeter()
-        let audioCapture = AudioCapture()
+        let audioCapture = AudioCapture(preferredInputDevice: microphone)
         let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
@@ -138,6 +170,11 @@ struct DictationPreviewCLI {
         }
 
         emit("Moonshine live preview")
+        if let microphone {
+            emit("microphone_selected=\"\(escapedLogValue(microphone))\"")
+        } else {
+            emit("microphone_selected=\"system_default\"")
+        }
         emit("Focus the target text field before starting.")
         emit("Press Enter to start recording.")
         _ = readLine()
@@ -169,7 +206,13 @@ struct DictationPreviewCLI {
         }
     }
 
-    private static func runHotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?) {
+    private static func runHotkeyDaemon(
+        model: String,
+        pythonBinary: String,
+        scriptPath: String,
+        shortcutIdentifier: String?,
+        microphone: String?
+    ) {
         let statusUI = ConsoleStatusUI()
         let logger = ConsoleLogger()
         logger.onLog = { message in
@@ -184,7 +227,7 @@ struct DictationPreviewCLI {
             }
         }
 
-        let audioCapture = AudioCapture()
+        let audioCapture = AudioCapture(preferredInputDevice: microphone)
         let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
@@ -243,6 +286,12 @@ struct DictationPreviewCLI {
         } catch {
             emit("error=hotkey_start_failed details=\(error)")
             return
+        }
+
+        if let microphone {
+            emit("microphone_selected=\"\(escapedLogValue(microphone))\"")
+        } else {
+            emit("microphone_selected=\"system_default\"")
         }
 
         #if canImport(Carbon)
@@ -327,8 +376,9 @@ private struct Arguments {
     enum Mode {
         case simulate(String)
         case moonshineWAV(path: String, model: String, pythonBinary: String, scriptPath: String)
-        case moonshineLive(model: String, pythonBinary: String, scriptPath: String)
-        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?)
+        case moonshineLive(model: String, pythonBinary: String, scriptPath: String, microphone: String?)
+        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?, microphone: String?)
+        case listMicrophones
         case captureShortcut
         case configWizard(
             configDir: String,
@@ -344,8 +394,9 @@ private struct Arguments {
     Usage:
       swift run DictationPreviewCLI --simulate "hello world"
       swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
+      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
+      swift run DictationPreviewCLI --list-microphones
       swift run DictationPreviewCLI --capture-shortcut
       swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false]
     """
@@ -390,7 +441,14 @@ private struct Arguments {
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            return Arguments(mode: .moonshineLive(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
+            return Arguments(
+                mode: .moonshineLive(
+                    model: model,
+                    pythonBinary: pythonBinary,
+                    scriptPath: scriptPath,
+                    microphone: value(after: "--microphone", in: rawArgs)
+                )
+            )
         }
 
         if rawArgs.contains("--hotkey-daemon") {
@@ -406,7 +464,19 @@ private struct Arguments {
                 environment: environment
             )
             let shortcutIdentifier = value(after: "--shortcut", in: rawArgs)
-            return Arguments(mode: .hotkeyDaemon(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, shortcutIdentifier: shortcutIdentifier))
+            return Arguments(
+                mode: .hotkeyDaemon(
+                    model: model,
+                    pythonBinary: pythonBinary,
+                    scriptPath: scriptPath,
+                    shortcutIdentifier: shortcutIdentifier,
+                    microphone: value(after: "--microphone", in: rawArgs)
+                )
+            )
+        }
+
+        if rawArgs.contains("--list-microphones") {
+            return Arguments(mode: .listMicrophones)
         }
 
         if rawArgs.contains("--capture-shortcut") {
@@ -665,6 +735,14 @@ private final class LiveCaptureMeter {
 
         return sqrt(energy / Double(samples.count))
     }
+}
+
+private func escapedLogValue(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
+        .replacingOccurrences(of: "\r", with: "\\r")
 }
 
 private func emit(_ line: String) {

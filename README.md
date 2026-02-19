@@ -34,7 +34,7 @@ flowchart LR
   D --> E{Rewrite mode}
   E -->|literal| F[Use cleaned text directly]
   E -->|smart| G[Optional OpenRouter rewrite]
-  G --> H[Guardrails verify quality]
+  G --> H[Guardrails<br/>symbol preservation + drift checks]
   F --> I[Insert text in focused app]
   H --> I
   I --> J[Store local history entry]
@@ -43,7 +43,7 @@ flowchart LR
 Quick glossary:
 - `ASR` (Automatic Speech Recognition): speech-to-text conversion.
 - `SessionOrchestrator`: the "traffic controller" that coordinates capture, rewrite, and insertion.
-- `Guardrails`: safety checks that reject risky rewrites and fall back to deterministic text.
+- `Guardrails`: rewrite checks for symbol preservation (`!`, `?`, `@`), length spike rejection, and content-overlap rejection.
 
 Background mode:
 
@@ -105,7 +105,8 @@ flowchart TD
   B -->|smart| D{API key available?}
   D -->|no| E[Keep deterministic cleaned text]
   D -->|yes| F[Request rewrite from OpenRouter]
-  F --> G{Passes guardrails?}
+  F --> R[Guardrails<br/>1) keep ! ? @ symbols<br/>2) reject length spikes<br/>3) reject low content overlap]
+  R --> G{Passes guardrails?}
   G -->|yes| H[Use rewritten text]
   G -->|no| E
 ```
@@ -143,6 +144,8 @@ murmur config set --shortcut "ctrl+option+space"
 murmur config set --reset-shortcut
 murmur config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
 murmur config set --pause-media true
+murmur config set --microphone "MacBook Pro Microphone"
+murmur config set --reset-microphone
 murmur config set --api-key "<token>"
 murmur config set --clear-api-key
 ```
@@ -153,23 +156,17 @@ Config precedence:
 3. Config files in `~/Library/Application Support/Murmur`
 4. Built-in defaults (`literal` mode, default model id)
 
-How precedence works:
-
-```mermaid
-flowchart TD
-  A[1) CLI flag provided?] -->|yes| Z[Use CLI value]
-  A -->|no| B[2) Env var provided?]
-  B -->|yes| Z
-  B -->|no| C[3) Config file value present?]
-  C -->|yes| Z
-  C -->|no| D[4) Use built-in default]
-  D --> Z
-```
-
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
 - When enabled, Murmur will best-effort pause/resume Music and Spotify while recording is active.
 - You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
+
+Microphone selection:
+- Optional setting: `microphone` (`system_default` by default).
+- Set by name or UID in config: `murmur config set --microphone "<name-or-uid>"`.
+- Inspect available devices: `murmur microphones`.
+- Reset to OS default input: `murmur config set --reset-microphone`.
+- You can also override with `MURMUR_MICROPHONE="<name-or-uid>"`.
 
 ## Logging and Grep
 
@@ -200,12 +197,13 @@ rg "level=info warning=" /tmp/murmur-menubar.log
 ## CLI Reference
 
 ```bash
-murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
-murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>]
+murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
 murmur stop
 murmur logs
+murmur microphones
 murmur config
-murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--api-key <token>] [--clear-api-key]
+murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
 murmur uninstall
@@ -240,6 +238,7 @@ Useful code paths:
 - ASR fails:
   - Run `murmur doctor`.
   - Confirm Python path + Moonshine script resolution.
+  - Run `murmur microphones` and bind a known-good input with `murmur config set --microphone "<name-or-uid>"`.
 - Smart rewrite not applying:
   - Confirm mode is `smart`.
   - Confirm API key is present (`murmur doctor` shows key presence/source).
@@ -262,6 +261,7 @@ flowchart TD
   subgraph Transform["Clean + Rewrite"]
     Clean[TextPostProcessorV2]
     Rewrite[OpenRouterTranscriptRewriter<br/>smart mode only]
+    Guardrails[Rewrite Guardrails<br/>symbol + drift checks]
   end
 
   subgraph Output["Insert + Observe"]
@@ -275,8 +275,9 @@ flowchart TD
   Audio --> ASR
   ASR --> Clean
   Clean --> Rewrite
+  Rewrite --> Guardrails
   Clean --> Writer
-  Rewrite --> Writer
+  Guardrails --> Writer
   Writer --> History
   Orch --> UI
 ```
