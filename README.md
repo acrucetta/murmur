@@ -105,7 +105,7 @@ flowchart TD
   B -->|smart| D{API key available?}
   D -->|no| E[Keep deterministic cleaned text]
   D -->|yes| F[Request rewrite from OpenRouter]
-  F --> R[Guardrails<br/>1) keep ! ? @ symbols<br/>2) reject length spikes<br/>3) reject low content overlap]
+  F --> R[Guardrails<br/>1 keep required symbols<br/>2 reject length spikes<br/>3 reject low content overlap]
   R --> G{Passes guardrails?}
   G -->|yes| H[Use rewritten text]
   G -->|no| E
