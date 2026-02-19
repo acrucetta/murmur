@@ -1050,7 +1050,7 @@ private final class RecordingOverlayView: NSView {
     private let activityPill = OverlayCapsuleView()
     private let dismissBadge = OverlayBadgeView(symbolName: "xmark")
     private let stopBadge = OverlayBadgeView(symbolName: "stop.fill")
-    private let meterView = OverlayMeterDotsView()
+    private let meterView = OverlayMeterWaveView()
 
     private var activityWidthConstraint: NSLayoutConstraint?
     private var activityHeightConstraint: NSLayoutConstraint?
@@ -1275,10 +1275,10 @@ private final class RecordingOverlayView: NSView {
                     showBadges: false,
                     showMeter: true,
                     meterActive: false,
-                    activityWidth: 104,
-                    activityHeight: 30,
-                    meterWidth: 60,
-                    meterHeight: 10,
+                    activityWidth: 118,
+                    activityHeight: 32,
+                    meterWidth: 74,
+                    meterHeight: 12,
                     leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                     leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                     rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.66),
@@ -1317,10 +1317,10 @@ private final class RecordingOverlayView: NSView {
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
-                activityWidth: 172,
+                activityWidth: 198,
                 activityHeight: 38,
-                meterWidth: 70,
-                meterHeight: 12,
+                meterWidth: 96,
+                meterHeight: 18,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                 rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.68),
@@ -1338,10 +1338,10 @@ private final class RecordingOverlayView: NSView {
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
-                activityWidth: 166,
+                activityWidth: 190,
                 activityHeight: 38,
-                meterWidth: 68,
-                meterHeight: 12,
+                meterWidth: 90,
+                meterHeight: 16,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                 rightBadgeFill: NSColor.systemOrange.withAlphaComponent(0.66),
@@ -1482,7 +1482,7 @@ private final class OverlayBadgeView: NSView {
     }
 }
 
-private final class OverlayMeterDotsView: NSView {
+private final class OverlayMeterWaveView: NSView {
     private(set) var isActive = false
     private var level: CGFloat = 0
     private var phase: CGFloat = 0
@@ -1513,42 +1513,61 @@ private final class OverlayMeterDotsView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let count = 9
-        let minimumSpacing: CGFloat = 3.4
-        let maximumSpacing: CGFloat = 5.0
-        var barWidth: CGFloat = isActive ? 4.4 : 4.2
-        var spacing = (bounds.width - (CGFloat(count) * barWidth)) / CGFloat(count - 1)
-        spacing = min(maximumSpacing, max(minimumSpacing, spacing))
-
-        var totalWidth = (CGFloat(count) * barWidth) + (CGFloat(count - 1) * spacing)
-        if totalWidth > bounds.width {
-            barWidth = max(3.0, (bounds.width - (CGFloat(count - 1) * minimumSpacing)) / CGFloat(count))
-            spacing = minimumSpacing
-            totalWidth = (CGFloat(count) * barWidth) + (CGFloat(count - 1) * spacing)
+        guard bounds.width > 4, bounds.height > 4 else {
+            return
         }
 
-        let startX = (bounds.width - totalWidth) * 0.5
-        let centerY = bounds.midY
+        let rect = bounds.insetBy(dx: 1, dy: 1)
+        let centerY = rect.midY
+        let clampedLevel = min(1, max(0, level))
+        let baselineAlpha: CGFloat = isActive ? 0.25 : 0.18
 
-        for index in 0..<count {
-            let x = startX + CGFloat(index) * (barWidth + spacing)
-            let wave = (sin(phase + (CGFloat(index) * 0.74)) + 1) * 0.5
+        let baseline = NSBezierPath()
+        baseline.move(to: NSPoint(x: rect.minX, y: centerY))
+        baseline.line(to: NSPoint(x: rect.maxX, y: centerY))
+        baseline.lineWidth = 1
+        NSColor.white.withAlphaComponent(baselineAlpha).setStroke()
+        baseline.stroke()
 
-            let normalized: CGFloat
-            if isActive {
-                normalized = min(1, (level * 0.76) + (wave * 0.24))
+        let maxAmplitude = rect.height * 0.45
+        let primaryAmplitude = isActive ? maxAmplitude * (0.22 + (clampedLevel * 0.78)) : maxAmplitude * 0.14
+        let secondaryAmplitude = primaryAmplitude * 0.58
+        let cycleCount = 1.6 + (clampedLevel * 1.7)
+        let steps = max(36, Int(rect.width * 2))
+
+        let primaryPath = NSBezierPath()
+        let secondaryPath = NSBezierPath()
+        for step in 0..<steps {
+            let progress = CGFloat(step) / CGFloat(max(1, steps - 1))
+            let x = rect.minX + (rect.width * progress)
+            let envelope = max(0.22, sin(progress * .pi))
+            let angle = (progress * cycleCount * .pi * 2) + (phase * 1.25)
+
+            let primaryY = centerY + sin(angle) * primaryAmplitude * envelope
+            let secondaryY = centerY + sin((angle * 1.35) + 1.2) * secondaryAmplitude * envelope
+
+            let primaryPoint = NSPoint(x: x, y: primaryY)
+            let secondaryPoint = NSPoint(x: x, y: secondaryY)
+            if step == 0 {
+                primaryPath.move(to: primaryPoint)
+                secondaryPath.move(to: secondaryPoint)
             } else {
-                normalized = 0.2
+                primaryPath.line(to: primaryPoint)
+                secondaryPath.line(to: secondaryPoint)
             }
-
-            let height = 3.2 + normalized * (isActive ? 13 : 3.8)
-            let y = centerY - (height * 0.5)
-            let rect = NSRect(x: x, y: y, width: barWidth, height: height)
-            let path = NSBezierPath(roundedRect: rect, xRadius: barWidth * 0.5, yRadius: barWidth * 0.5)
-            let alpha = isActive ? (0.36 + (normalized * 0.34)) : 0.24
-            NSColor.white.withAlphaComponent(alpha).setFill()
-            path.fill()
         }
+
+        primaryPath.lineJoinStyle = .round
+        primaryPath.lineCapStyle = .round
+        primaryPath.lineWidth = isActive ? 2.2 : 1.6
+        NSColor.white.withAlphaComponent(isActive ? 0.78 : 0.34).setStroke()
+        primaryPath.stroke()
+
+        secondaryPath.lineJoinStyle = .round
+        secondaryPath.lineCapStyle = .round
+        secondaryPath.lineWidth = isActive ? 1.6 : 1.2
+        NSColor.white.withAlphaComponent(isActive ? 0.42 : 0.22).setStroke()
+        secondaryPath.stroke()
     }
 }
 
