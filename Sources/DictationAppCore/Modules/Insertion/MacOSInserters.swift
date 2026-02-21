@@ -1,54 +1,11 @@
 import Foundation
-#if canImport(AppKit)
 import AppKit
 import ApplicationServices
-#endif
 
-enum InsertionSurfacePolicy {
-    static let forcedClipboardBundleIdentifiers: Set<String> = [
-        "com.apple.notes",
-        "com.apple.terminal",
-        "com.github.wez.wezterm",
-        "com.googlecode.iterm2",
-        "com.mitchellh.ghostty",
-        "dev.warp.warp-stable",
-        "net.kovidgoyal.kitty",
-        "org.alacritty",
-    ]
-
-    static func requiresClipboardFallback(bundleIdentifier: String?) -> Bool {
-        guard let bundleIdentifier else {
-            return false
-        }
-
-        let normalized = bundleIdentifier
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard !normalized.isEmpty else {
-            return false
-        }
-
-        return forcedClipboardBundleIdentifiers.contains(normalized)
-    }
-}
-
-#if canImport(AppKit)
 public final class AccessibilityDirectInserter: AccessibilityDirectInserting {
-    private let frontmostBundleIdentifier: () -> String?
-
-    public init(
-        frontmostBundleIdentifier: @escaping () -> String? = {
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        }
-    ) {
-        self.frontmostBundleIdentifier = frontmostBundleIdentifier
-    }
+    public init() {}
 
     public func insertDirect(_ text: String) -> InsertResult {
-        if InsertionSurfacePolicy.requiresClipboardFallback(bundleIdentifier: frontmostBundleIdentifier()) {
-            return .init(success: false, method: .accessibilityDirect, error: .insertionFailed)
-        }
-
         guard AXIsProcessTrusted() else {
             return .init(success: false, method: .accessibilityDirect, error: .permissionDenied)
         }
@@ -122,18 +79,20 @@ public final class ClipboardFallbackInserter: ClipboardFallbackPasting {
 
     public func paste(_ text: String) -> InsertResult {
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
-        defer { snapshot.restore(into: pasteboard) }
 
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
+            snapshot.restore(into: pasteboard)
             return .init(success: false, method: .clipboardPaste, error: .insertionFailed)
         }
 
+        sleeper(0.01)
         guard eventPoster.postCommandV() else {
             return .init(success: false, method: .clipboardPaste, error: .permissionDenied)
         }
 
         sleeper(0.05)
+        snapshot.restore(into: pasteboard)
         return .init(success: true, method: .clipboardPaste, error: nil)
     }
 }
@@ -192,30 +151,3 @@ private struct PasteboardSnapshot {
         }
     }
 }
-#else
-public final class AccessibilityDirectInserter: AccessibilityDirectInserting {
-    public init() {}
-
-    public func insertDirect(_ text: String) -> InsertResult {
-        .init(success: false, method: .accessibilityDirect, error: .insertionFailed)
-    }
-}
-
-public final class ClipboardFallbackInserter: ClipboardFallbackPasting {
-    public init() {}
-
-    public func paste(_ text: String) -> InsertResult {
-        .init(success: false, method: .clipboardPaste, error: .insertionFailed)
-    }
-}
-
-public protocol CGEventPosting {
-    func postCommandV() -> Bool
-}
-
-public struct SystemCGEventPoster: CGEventPosting {
-    public init() {}
-
-    public func postCommandV() -> Bool { false }
-}
-#endif

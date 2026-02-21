@@ -68,6 +68,8 @@ Default resolver order for python:
 
 Advanced script flags (passed via `--moonshine-script` custom wrapper):
 - `--backend auto|voice|onnx` (default `auto`)
+- `--offline` (default; local-only runtime, no model downloads)
+- `--allow-network` (opt-in override to permit runtime model fetch)
 - `--voice-model-path /absolute/path/to/model_dir`
 - `--voice-model-arch medium-streaming|small-streaming|...`
 - `--max-tokens-per-second <int>`
@@ -75,7 +77,8 @@ Advanced script flags (passed via `--moonshine-script` custom wrapper):
 
 ## Notes
 - This path is fully local/offline after model assets are available on disk.
-- `scripts/moonshine_transcribe.py` tries `moonshine_voice` first, then falls back to `moonshine_onnx`.
+- Runtime now enforces local-only by default (`--offline`) and fails fast if local model assets are missing.
+- `scripts/moonshine_transcribe.py` uses `moonshine_voice` in offline auto mode; `moonshine_onnx` fallback is only used when network mode is allowed.
 - Live mode quality depends on local microphone/input settings and speaking during capture window.
 
 ## Troubleshooting daemon/hotkeys

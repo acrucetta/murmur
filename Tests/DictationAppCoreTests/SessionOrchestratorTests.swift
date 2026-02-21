@@ -58,6 +58,15 @@ struct SessionOrchestratorTests {
             transcriptHistory: history,
             logger: logger,
             now: ClockSequence([
+                Date(timeIntervalSince1970: 1.201),
+                Date(timeIntervalSince1970: 1.202),
+                Date(timeIntervalSince1970: 1.203),
+                Date(timeIntervalSince1970: 1.204),
+                Date(timeIntervalSince1970: 1.205),
+                Date(timeIntervalSince1970: 1.206),
+                Date(timeIntervalSince1970: 1.207),
+                Date(timeIntervalSince1970: 1.208),
+                Date(timeIntervalSince1970: 1.209),
                 Date(timeIntervalSince1970: 1.5),
                 Date(timeIntervalSince1970: 1.8)
             ]).next
@@ -93,6 +102,73 @@ struct SessionOrchestratorTests {
         #expect(mediaController.pauseCallCount == 1)
         #expect(mediaController.resumeCallCount == 1)
         #expect(orchestrator.state == .idle)
+    }
+
+    @Test
+    func shortcutPressLogsStartLatencyMilestones() {
+        let logger = LoggerSpy()
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: FakeASREngine(),
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            logger: logger,
+            now: ClockSequence([
+                Date(timeIntervalSince1970: 10.040),
+                Date(timeIntervalSince1970: 10.041),
+                Date(timeIntervalSince1970: 10.044),
+                Date(timeIntervalSince1970: 10.045),
+                Date(timeIntervalSince1970: 10.052),
+                Date(timeIntervalSince1970: 10.065),
+                Date(timeIntervalSince1970: 10.066),
+                Date(timeIntervalSince1970: 10.068),
+                Date(timeIntervalSince1970: 10.090)
+            ]).next
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date(timeIntervalSince1970: 10.0))))
+
+        #expect(logger.messages.contains("shortcut_to_listening_ms=40"))
+        #expect(logger.messages.contains("asr_start_duration_ms=3"))
+        #expect(logger.messages.contains("audio_capture_start_duration_ms=7"))
+        #expect(logger.messages.contains("shortcut_to_audio_start_ms=65"))
+        #expect(logger.messages.contains("feedback_dispatch_duration_ms=2"))
+        #expect(logger.messages.contains("shortcut_to_feedback_dispatch_ms=90"))
+    }
+
+    @Test
+    func firstAudioFrameLatencyLogsOnlyOncePerSession() {
+        let logger = LoggerSpy()
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: FakeASREngine(),
+            postProcessor: TextPostProcessorV2(),
+            fieldWriter: FakeFieldWriter(),
+            statusUI: StatusUISpy(),
+            logger: logger,
+            now: ClockSequence([
+                Date(timeIntervalSince1970: 20.005),
+                Date(timeIntervalSince1970: 20.006),
+                Date(timeIntervalSince1970: 20.007),
+                Date(timeIntervalSince1970: 20.008),
+                Date(timeIntervalSince1970: 20.009),
+                Date(timeIntervalSince1970: 20.010),
+                Date(timeIntervalSince1970: 20.020),
+                Date(timeIntervalSince1970: 20.030),
+                Date(timeIntervalSince1970: 20.040),
+                Date(timeIntervalSince1970: 20.155)
+            ]).next
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date(timeIntervalSince1970: 20.0))))
+        orchestrator.handle(.audioFrame(.init(samples: [0.1, 0.2], sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.audioFrame(.init(samples: [0.2, 0.1], sampleRate: 16_000, channels: 1)))
+
+        #expect(logger.messages.contains("shortcut_to_first_audio_frame_ms=155"))
+        #expect(logger.messages.filter { $0 == "shortcut_to_first_audio_frame_ms=155" }.count == 1)
     }
 
     @Test
@@ -422,9 +498,12 @@ struct SessionOrchestratorTests {
     @Test
     func appliesSmartRewriteWithProvidedContextBeforeInsert() {
         let asr = FakeASREngine()
-        asr.nextFinalTranscript = .init(text: "ship tomorrow", confidence: 0.8)
+        asr.nextFinalTranscript = .init(
+            text: "ship tomorrow maybe next week but not sure maybe follow up with the team and confirm the final timeline before sending and also check with finance and legal before we announce the date to everyone in the company channel",
+            confidence: 0.8
+        )
         let writer = FakeFieldWriter()
-        let rewriter = RewriteSpy(nextResult: "Ship on Friday.")
+        let rewriter = RewriteSpy(nextResult: "Ship tomorrow. Maybe next week, but let's confirm the timeline before sending.")
         let logger = LoggerSpy()
         let contextProvider = FixedRewriteContextProvider(
             context: .init(
@@ -447,19 +526,19 @@ struct SessionOrchestratorTests {
         )
 
         orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
-        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.05, count: 8_000), sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.005, count: 8_000), sampleRate: 16_000, channels: 1)))
         orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
 
         #expect(rewriter.callCount == 1)
-        #expect(rewriter.lastInput == "Ship tomorrow.")
+        #expect(rewriter.lastInput?.contains("confirm the final timeline before sending") == true)
         #expect(rewriter.lastContext?.frontmostAppBundleID == "com.apple.mail")
         #expect(rewriter.lastContext?.mode == "smart")
-        #expect(writer.lastInsertedText == "Ship on Friday.")
+        #expect(writer.lastInsertedText == "Ship tomorrow. Maybe next week, but let's confirm the timeline before sending.")
         #expect(logger.messages.contains(where: {
-            $0.hasPrefix("rewrite_input mode=\"smart\" chars=14 preview=\"Ship tomorrow.\"")
+            $0.hasPrefix("rewrite_input mode=\"smart\"")
         }))
         #expect(logger.messages.contains(where: {
-            $0.hasPrefix("rewrite_output source=llm changed=true chars=15 preview=\"Ship on Friday.\"")
+            $0.hasPrefix("rewrite_output source=llm changed=true")
         }))
     }
 
@@ -502,6 +581,88 @@ struct SessionOrchestratorTests {
         #expect(logger.messages.contains(where: {
             $0.hasPrefix("rewrite_output source=original changed=false chars=14 preview=\"Ship tomorrow.\"")
         }))
+    }
+
+    @Test
+    func smartRewriteSkipsLowNeedHighQualityTranscript() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "this is already easy to read and should stay local", confidence: 0.9)
+        let writer = FakeFieldWriter()
+        let rewriter = RewriteSpy(nextResult: "This rewrite should not run.")
+        let logger = LoggerSpy()
+        let contextProvider = FixedRewriteContextProvider(
+            context: .init(
+                frontmostAppBundleID: "com.apple.mail",
+                frontmostAppName: "Mail",
+                mode: "smart"
+            )
+        )
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(mode: .literal),
+            transcriptRewriter: rewriter,
+            rewriteContextProvider: contextProvider,
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.08, count: 8_000), sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(rewriter.callCount == 0)
+        #expect(writer.lastInsertedText == "This is already easy to read and should stay local.")
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("smart_rewrite_need score=")
+        }))
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("smart_rewrite_skipped reason=low_need")
+        }))
+    }
+
+    @Test
+    func smartRewriteDoesNotSkipLowNeedWhenCaptureQualityIsLow() {
+        let asr = FakeASREngine()
+        asr.nextFinalTranscript = .init(text: "this is already easy to read and should stay local", confidence: 0.9)
+        let writer = FakeFieldWriter()
+        let rewriter = RewriteSpy(nextResult: "This rewrite should run.")
+        let logger = LoggerSpy()
+        let contextProvider = FixedRewriteContextProvider(
+            context: .init(
+                frontmostAppBundleID: "com.apple.mail",
+                frontmostAppName: "Mail",
+                mode: "smart"
+            )
+        )
+
+        let orchestrator = SessionOrchestrator(
+            permissionManager: FakePermissionManager(snapshot: .allGranted),
+            audioCapture: FakeAudioCapture(),
+            asrEngine: asr,
+            postProcessor: TextPostProcessorV2(mode: .literal),
+            transcriptRewriter: rewriter,
+            rewriteContextProvider: contextProvider,
+            fieldWriter: writer,
+            statusUI: StatusUISpy(),
+            logger: logger
+        )
+
+        orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+        orchestrator.handle(.audioFrame(.init(samples: Array(repeating: 0.005, count: 8_000), sampleRate: 16_000, channels: 1)))
+        orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+        #expect(rewriter.callCount == 1)
+        #expect(writer.lastInsertedText == "This rewrite should run.")
+        #expect(logger.messages.contains(where: {
+            $0.contains("smart_rewrite_need score=") && $0.contains("capture_quality_very_low")
+        }))
+        #expect(logger.messages.contains(where: {
+            $0.hasPrefix("smart_rewrite_skipped reason=low_need")
+        }) == false)
     }
 
     @Test

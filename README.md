@@ -58,7 +58,7 @@ murmur stop
 - macOS 13+
 - Swift toolchain (Xcode Command Line Tools is enough)
 - Python 3 (for Moonshine runtime setup)
-- Internet access on first install (dependencies + model download)
+- Internet access on first install only (dependencies + model download)
 
 ## Installation
 
@@ -74,6 +74,8 @@ This installer:
 - downloads the English Moonshine model
 - builds `MurmurMenuBarApp`
 - installs global `murmur` command
+
+Runtime ASR is local-only by default (`scripts/moonshine_transcribe.py --offline` via app runtime). If local model assets are missing, Murmur fails fast instead of downloading at dictation time.
 
 Useful options:
 

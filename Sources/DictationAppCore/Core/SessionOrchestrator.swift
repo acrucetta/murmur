@@ -3,6 +3,10 @@ import Foundation
 public final class SessionOrchestrator {
     public typealias NowProvider = () -> Date
     private static let minimumSmartRewriteDurationMilliseconds = 350
+    private static let minimumSmartRewriteNeedScore = 3
+    private static let longTranscriptCharacterThreshold = 220
+    private static let longTranscriptTokenThreshold = 36
+    private static let runOnCandidateTokenThreshold = 24
 
     private let stateMachine: StateMachine
     private let permissionManager: PermissionManaging
@@ -18,7 +22,9 @@ public final class SessionOrchestrator {
     private let transcriptHistory: TranscriptHistoryWriting
     private let logger: Logging
     private let now: NowProvider
+    private var shortcutPressTimestamp: Date?
     private var releaseTimestamp: Date?
+    private var hasLoggedFirstAudioFrameLatency = false
     private var capturedFrameCount = 0
     private var capturedSampleCount = 0
     private var capturedDurationSeconds: Double = 0
@@ -90,6 +96,7 @@ public final class SessionOrchestrator {
             guard state == .listening else {
                 return
             }
+            logShortcutToFirstAudioFrameLatencyIfNeeded()
             asrEngine.consume(audioFrame)
             recordAudioCaptureDiagnostics(for: audioFrame)
         case .partialTranscript(let partialTranscript):
@@ -106,6 +113,8 @@ public final class SessionOrchestrator {
                 logRewriteInput(cleaned, mode: rewriteContext.mode)
                 let rewritten: String?
                 if shouldSkipSmartRewriteForShortRecording(mode: rewriteContext.mode) {
+                    rewritten = nil
+                } else if shouldSkipSmartRewriteForLowNeed(mode: rewriteContext.mode, text: cleaned) {
                     rewritten = nil
                 } else {
                     rewritten = transcriptRewriter
@@ -155,6 +164,7 @@ public final class SessionOrchestrator {
             transition(.reset)
         }
 
+        clearPressSideLatencyState()
         let permissions = permissionManager.currentStatus()
         guard permissions.allGranted else {
             permissionManager.requestMissingPermissions()
@@ -167,11 +177,21 @@ public final class SessionOrchestrator {
 
         transition(event)
         if state == .listening {
+            shortcutPressTimestamp = pressDate(from: event)
+            logShortcutLatencyIfPossible(label: "shortcut_to_listening_ms")
             recordingMediaController.pauseMediaForRecording()
             resetCaptureDiagnostics()
+            let asrStartBeganAt = now()
             asrEngine.start()
+            logOperationDuration(startedAt: asrStartBeganAt, label: "asr_start_duration_ms")
+            let audioCaptureStartBeganAt = now()
             audioCapture.start()
+            logOperationDuration(startedAt: audioCaptureStartBeganAt, label: "audio_capture_start_duration_ms")
+            logShortcutLatencyIfPossible(label: "shortcut_to_audio_start_ms")
+            let feedbackDispatchBeganAt = now()
             feedback.recordingDidStart()
+            logOperationDuration(startedAt: feedbackDispatchBeganAt, label: "feedback_dispatch_duration_ms")
+            logShortcutLatencyIfPossible(label: "shortcut_to_feedback_dispatch_ms")
         }
     }
 
@@ -184,6 +204,41 @@ public final class SessionOrchestrator {
             return nil
         }
         return released.timestamp
+    }
+
+    private func pressDate(from event: SessionEvent) -> Date? {
+        guard case .shortcutPressed(let pressed) = event else {
+            return nil
+        }
+        return pressed.timestamp
+    }
+
+    private func logShortcutToFirstAudioFrameLatencyIfNeeded() {
+        guard !hasLoggedFirstAudioFrameLatency else {
+            return
+        }
+        logShortcutLatencyIfPossible(label: "shortcut_to_first_audio_frame_ms")
+        hasLoggedFirstAudioFrameLatency = true
+    }
+
+    private func logShortcutLatencyIfPossible(label: String) {
+        guard let shortcutPressTimestamp else {
+            return
+        }
+        let elapsed = now().timeIntervalSince(shortcutPressTimestamp)
+        let milliseconds = max(0, Int((elapsed * 1000).rounded()))
+        logger.log("\(label)=\(milliseconds)")
+    }
+
+    private func logOperationDuration(startedAt: Date, label: String) {
+        let elapsed = now().timeIntervalSince(startedAt)
+        let milliseconds = max(0, Int((elapsed * 1000).rounded()))
+        logger.log("\(label)=\(milliseconds)")
+    }
+
+    private func clearPressSideLatencyState() {
+        shortcutPressTimestamp = nil
+        hasLoggedFirstAudioFrameLatency = false
     }
 
     private func logReleaseToFinalLatencyIfPossible() {
@@ -316,8 +371,75 @@ public final class SessionOrchestrator {
         return true
     }
 
+    private func shouldSkipSmartRewriteForLowNeed(mode: String, text: String) -> Bool {
+        guard TranscriptRewriteMode.parse(mode) == .smart else {
+            return false
+        }
+
+        let need = smartRewriteNeed(text: text)
+        let reasonText = need.reasons.isEmpty ? "none" : need.reasons.joined(separator: ",")
+        logger.log(
+            "smart_rewrite_need score=\(need.score) threshold=\(Self.minimumSmartRewriteNeedScore) reasons=\(reasonText)"
+        )
+
+        guard need.score < Self.minimumSmartRewriteNeedScore else {
+            return false
+        }
+
+        logger.log(
+            "smart_rewrite_skipped reason=low_need score=\(need.score)" +
+                " threshold=\(Self.minimumSmartRewriteNeedScore) reasons=\(reasonText)"
+        )
+        return true
+    }
+
+    private func smartRewriteNeed(text: String) -> (score: Int, reasons: [String]) {
+        var score = 0
+        var reasons: [String] = []
+
+        let tokenCount = text.split(whereSeparator: \.isWhitespace).count
+        let quality = captureQualityLabel()
+        if quality != "ok" {
+            score += 3
+            reasons.append("capture_quality_\(quality)")
+        }
+
+        if text.count >= Self.longTranscriptCharacterThreshold {
+            score += 1
+            reasons.append("long_text_chars")
+        }
+
+        if tokenCount >= Self.longTranscriptTokenThreshold {
+            score += 1
+            reasons.append("long_text_tokens")
+        }
+
+        if tokenCount >= Self.runOnCandidateTokenThreshold && !hasInternalSentenceBoundary(text) {
+            score += 1
+            reasons.append("run_on_candidate")
+        }
+
+        return (score, reasons)
+    }
+
     private func captureDurationMilliseconds() -> Int {
         max(0, Int((capturedDurationSeconds * 1000).rounded()))
+    }
+
+    private func hasInternalSentenceBoundary(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 1 else {
+            return false
+        }
+
+        let endIndex = trimmed.index(before: trimmed.endIndex)
+        for index in trimmed.indices where index < endIndex {
+            let character = trimmed[index]
+            if character == "." || character == "!" || character == "?" {
+                return true
+            }
+        }
+        return false
     }
 
     private func frameDurationSeconds(_ frame: AudioFrame) -> Double {

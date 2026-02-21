@@ -27,6 +27,7 @@ struct MoonshineProcessASREngineTests {
         #expect(capturedArguments.contains("scripts/moonshine_transcribe.py"))
         #expect(capturedArguments.contains("--model"))
         #expect(capturedArguments.contains("moonshine/tiny"))
+        #expect(capturedArguments.contains("--offline"))
         #expect(capturedArguments.contains { $0.hasSuffix(".wav") })
     }
 

@@ -25,6 +25,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.rewriteWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.openRouterTimeoutWarning {
+            emit("warning=\(warning)")
+        }
         if let warning = arguments.pauseMediaWarning {
             emit("warning=\(warning)")
         }
@@ -43,6 +46,7 @@ struct MurmurMenuBarApp {
             rewriteMode: arguments.rewriteMode,
             openRouterModel: arguments.openRouterModel,
             openRouterAPIKey: arguments.openRouterAPIKey,
+            openRouterRequestTimeoutSeconds: arguments.openRouterRequestTimeoutSeconds,
             pauseMediaWhileRecording: arguments.pauseMediaWhileRecording,
             preferredMicrophone: arguments.preferredMicrophone
         )
@@ -76,7 +80,9 @@ private struct Arguments {
     let rewriteMode: TranscriptRewriteMode
     let openRouterModel: String
     let openRouterAPIKey: String?
+    let openRouterRequestTimeoutSeconds: TimeInterval
     let rewriteWarning: String?
+    let openRouterTimeoutWarning: String?
     let pauseMediaWhileRecording: Bool
     let pauseMediaWarning: String?
     let preferredMicrophone: String?
@@ -92,6 +98,10 @@ private struct Arguments {
         )
         let rewriteResolution = resolveRewriteMode(
             explicit: value(after: "--rewrite-mode", in: rawArgs),
+            environment: environment
+        )
+        let openRouterTimeoutResolution = resolveOpenRouterRequestTimeoutSeconds(
+            explicitMilliseconds: value(after: "--openrouter-timeout-ms", in: rawArgs),
             environment: environment
         )
         let pauseMediaResolution = resolvePauseMediaWhileRecording(
@@ -123,7 +133,9 @@ private struct Arguments {
             rewriteMode: rewriteResolution.mode,
             openRouterModel: resolveOpenRouterModel(explicit: value(after: "--openrouter-model", in: rawArgs), environment: environment),
             openRouterAPIKey: resolveOpenRouterAPIKey(explicit: value(after: "--openrouter-api-key", in: rawArgs), environment: environment),
+            openRouterRequestTimeoutSeconds: openRouterTimeoutResolution.seconds,
             rewriteWarning: rewriteResolution.warning,
+            openRouterTimeoutWarning: openRouterTimeoutResolution.warning,
             pauseMediaWhileRecording: pauseMediaResolution.enabled,
             pauseMediaWarning: pauseMediaResolution.warning,
             preferredMicrophone: microphoneResolution.microphone,
@@ -228,6 +240,45 @@ private struct Arguments {
         }
 
         return nil
+    }
+
+    private static func resolveOpenRouterRequestTimeoutSeconds(
+        explicitMilliseconds: String?,
+        environment: [String: String]
+    ) -> (seconds: TimeInterval, warning: String?) {
+        let defaultMilliseconds: Double = 700
+
+        if let explicitMilliseconds {
+            guard let value = parsePositiveMilliseconds(explicitMilliseconds) else {
+                return (
+                    defaultMilliseconds / 1000,
+                    "invalid openrouter-timeout-ms '\(explicitMilliseconds)'; expected positive milliseconds"
+                )
+            }
+            return (value / 1000, nil)
+        }
+
+        if let envValue = environment["MURMUR_OPENROUTER_TIMEOUT_MS"],
+           !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard let value = parsePositiveMilliseconds(envValue) else {
+                return (
+                    defaultMilliseconds / 1000,
+                    "invalid MURMUR_OPENROUTER_TIMEOUT_MS '\(envValue)'; expected positive milliseconds"
+                )
+            }
+            return (value / 1000, nil)
+        }
+
+        return (defaultMilliseconds / 1000, nil)
+    }
+
+    private static func parsePositiveMilliseconds(_ value: String) -> Double? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(trimmed), parsed > 0 else {
+            return nil
+        }
+        return parsed
     }
 
     private static func resolvePauseMediaWhileRecording(
@@ -425,6 +476,7 @@ private final class MenuBarRuntime {
         rewriteMode: TranscriptRewriteMode,
         openRouterModel: String,
         openRouterAPIKey: String?,
+        openRouterRequestTimeoutSeconds: TimeInterval,
         pauseMediaWhileRecording: Bool,
         preferredMicrophone: String?
     ) {
@@ -454,11 +506,13 @@ private final class MenuBarRuntime {
             transcriptRewriter = OpenRouterTranscriptRewriter(
                 config: .init(
                     apiKey: openRouterAPIKey,
-                    model: openRouterModel
+                    model: openRouterModel,
+                    requestTimeoutSeconds: openRouterRequestTimeoutSeconds
                 ),
                 logger: logger
             )
-            logger.log("smart_rewrite_enabled provider=openrouter model=\(openRouterModel)")
+            let timeoutMs = max(1, Int((openRouterRequestTimeoutSeconds * 1000).rounded()))
+            logger.log("smart_rewrite_enabled provider=openrouter model=\(openRouterModel) timeout_ms=\(timeoutMs)")
         } else {
             transcriptRewriter = NoopTranscriptRewriter()
             if rewriteMode == .smart {
@@ -578,10 +632,9 @@ private final class MenuBarRuntime {
                 overlayController.updateAudioLevel(from: frame)
             }
         }
-        audioCapture.onError = { error in
-            logger.log("audio_capture_error error=\"\(escapeLogValue(error.localizedDescription))\"")
+        audioCapture.onError = { [weak self] error in
             Task { @MainActor in
-                menuBarController.setLastErrorMessage("audio: \(error.localizedDescription)")
+                self?.handleAudioCaptureError(error)
             }
         }
 
@@ -649,6 +702,38 @@ private final class MenuBarRuntime {
             menuBarController.setSettings(menuConfigSnapshot.menuSnapshot)
         } catch {
             logger.log("menu_settings_update_failed error=\"\(escapeLogValue(error.localizedDescription))\"")
+        }
+    }
+
+    private func handleAudioCaptureError(_ error: Error) {
+        logger.log("audio_capture_error error=\"\(escapeLogValue(error.localizedDescription))\"")
+        menuBarController.setLastErrorMessage("audio: \(error.localizedDescription)")
+
+        guard case AudioCaptureError.inputDeviceNotFound(let missingIdentifier) = error else {
+            return
+        }
+
+        guard let configuredMicrophone = menuConfigSnapshot.preferredMicrophone,
+              configuredMicrophone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        else {
+            return
+        }
+
+        let normalizedConfigured = configuredMicrophone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedMissing = missingIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedConfigured == normalizedMissing else {
+            return
+        }
+
+        do {
+            try configStore.persistPreferredMicrophone(nil)
+            menuConfigSnapshot.preferredMicrophone = nil
+            menuBarController.setSettings(menuConfigSnapshot.menuSnapshot)
+            logger.log(
+                "menu_settings_auto_cleared key=microphone reason=input_device_not_found value=\"\(escapeLogValue(normalizedMissing))\""
+            )
+        } catch {
+            logger.log("menu_settings_auto_clear_failed key=microphone error=\"\(escapeLogValue(error.localizedDescription))\"")
         }
     }
 }
@@ -1035,7 +1120,7 @@ private final class RecordingOverlayController {
         let visibleFrame = screen.visibleFrame
         let size = panel.frame.size
         let x = visibleFrame.midX - (size.width / 2)
-        let y = visibleFrame.minY + 20
+        let y = visibleFrame.minY + 8
         let safeX = max(visibleFrame.minX + 20, min(x, visibleFrame.maxX - size.width - 20))
         panel.setFrameOrigin(NSPoint(x: safeX, y: y))
     }
@@ -1275,10 +1360,10 @@ private final class RecordingOverlayView: NSView {
                     showBadges: false,
                     showMeter: true,
                     meterActive: false,
-                    activityWidth: 118,
-                    activityHeight: 32,
-                    meterWidth: 74,
-                    meterHeight: 12,
+                    activityWidth: 96,
+                    activityHeight: 26,
+                    meterWidth: 56,
+                    meterHeight: 10,
                     leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                     leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                     rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.66),
@@ -1296,7 +1381,7 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 58,
+                activityWidth: 40,
                 activityHeight: 8,
                 meterWidth: 34,
                 meterHeight: 8,
@@ -1317,10 +1402,10 @@ private final class RecordingOverlayView: NSView {
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
-                activityWidth: 198,
-                activityHeight: 38,
-                meterWidth: 96,
-                meterHeight: 18,
+                activityWidth: 160,
+                activityHeight: 30,
+                meterWidth: 76,
+                meterHeight: 14,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                 rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.68),
@@ -1338,10 +1423,10 @@ private final class RecordingOverlayView: NSView {
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
-                activityWidth: 190,
-                activityHeight: 38,
-                meterWidth: 90,
-                meterHeight: 16,
+                activityWidth: 150,
+                activityHeight: 28,
+                meterWidth: 70,
+                meterHeight: 12,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                 leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
                 rightBadgeFill: NSColor.systemOrange.withAlphaComponent(0.66),
@@ -1359,7 +1444,7 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 58,
+                activityWidth: 40,
                 activityHeight: 8,
                 meterWidth: 34,
                 meterHeight: 8,
@@ -1380,7 +1465,7 @@ private final class RecordingOverlayView: NSView {
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
-                activityWidth: 58,
+                activityWidth: 40,
                 activityHeight: 8,
                 meterWidth: 34,
                 meterHeight: 8,
@@ -1594,12 +1679,25 @@ private enum FeedbackSoundID: CaseIterable {
     }
 }
 
+@MainActor
 private enum FeedbackSoundLibrary {
+    private static var cachedSounds: [FeedbackSoundID: NSSound] = [:]
+
+    static func preloadAll() {
+        for id in FeedbackSoundID.allCases {
+            _ = loadSound(for: id)
+        }
+    }
+
     static func resourceURL(for id: FeedbackSoundID) -> URL? {
         id.asset.resourceURL
     }
 
     static func loadSound(for id: FeedbackSoundID) -> NSSound? {
+        if let cached = cachedSounds[id] {
+            return cached
+        }
+
         guard let url = resourceURL(for: id) else {
             return nil
         }
@@ -1608,6 +1706,7 @@ private enum FeedbackSoundLibrary {
             return nil
         }
         sound.volume = id.volume
+        cachedSounds[id] = sound
         return sound
     }
 }
@@ -1738,26 +1837,30 @@ private final class AppFeedbackPresenter: FeedbackPresenting {
     ) {
         self.onRecordingStarted = onRecordingStarted
         self.onRecordingStopped = onRecordingStopped
+        Task { @MainActor in
+            FeedbackSoundLibrary.preloadAll()
+        }
     }
 
     func recordingDidStart() {
         let onRecordingStarted = self.onRecordingStarted
         Task { @MainActor in
+            onRecordingStarted?()
             Self.playBestEffortCue(soundID: .recordingStart)
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
-            onRecordingStarted?()
         }
     }
 
     func recordingDidStop() {
         let onRecordingStopped = self.onRecordingStopped
         Task { @MainActor in
+            onRecordingStopped?()
             Self.playBestEffortCue(soundID: .recordingStop)
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .default)
-            onRecordingStopped?()
         }
     }
 
+    @MainActor
     private static func playBestEffortCue(soundID: FeedbackSoundID) {
         if let sound = FeedbackSoundLibrary.loadSound(for: soundID) {
             sound.stop()

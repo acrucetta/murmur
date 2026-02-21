@@ -143,7 +143,7 @@ struct TextPostProcessorTests {
         let processor = TextPostProcessorV2()
         let cleaned = processor.clean("really question mark wow exclamation point")
 
-        #expect(cleaned == "Really? wow!")
+        #expect(cleaned == "Really? Wow!")
     }
 
     @Test
@@ -168,5 +168,18 @@ struct TextPostProcessorTests {
         let cleaned = processor.clean("nice work exclamation mark")
 
         #expect(cleaned == "Nice work!")
+    }
+
+    @Test
+    func normalizesRunOnCapitalizationAndCommonAcronyms() {
+        let processor = TextPostProcessorV2()
+        let cleaned = processor.clean(
+            "Although when I think about it seems like the first record of The audio is very close to what the llm does after So maybe Let's try Seeing if we can clean up the text a bit more"
+        )
+
+        #expect(
+            cleaned ==
+                "Although when I think about it seems like the first record of the audio is very close to what the LLM does after. So maybe let's try seeing if we can clean up the text a bit more."
+        )
     }
 }

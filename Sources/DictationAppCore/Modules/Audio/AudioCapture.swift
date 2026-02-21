@@ -22,11 +22,29 @@ public enum AudioCaptureError: Error, Equatable, Sendable {
     case failedToEnumerateInputDevices(Int32)
 }
 
+extension AudioCaptureError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .inputDeviceNotFound(let identifier):
+            return "preferred input device not found: \(identifier)"
+        case .inputDeviceSelectionUnsupported:
+            return "preferred input selection is unsupported on this platform"
+        case .audioUnitUnavailable:
+            return "audio unit unavailable for input device selection"
+        case .failedToSetInputDevice(let status):
+            return "failed to set preferred input device (osstatus:\(status))"
+        case .failedToEnumerateInputDevices(let status):
+            return "failed to enumerate input devices (osstatus:\(status))"
+        }
+    }
+}
+
 public final class AudioCapture: AudioCapturing {
     public private(set) var isCapturing = false
     public var onFrame: ((AudioFrame) -> Void)?
     public var onError: ((Error) -> Void)?
     private let preferredInputDevice: String?
+    private var shouldAttemptPreferredInputDevice = true
 
 #if canImport(AVFoundation)
     private let engine: AVAudioEngine
@@ -56,11 +74,17 @@ public final class AudioCapture: AudioCapturing {
 #if canImport(AVFoundation)
         do {
             let inputNode = engine.inputNode
-            do {
-                try configurePreferredInputDeviceIfNeeded(inputNode: inputNode)
-            } catch AudioCaptureError.inputDeviceNotFound(let identifier) {
-                // Fall back to system default input if a configured device disappeared.
-                onError?(AudioCaptureError.inputDeviceNotFound(identifier))
+            if shouldAttemptPreferredInputDevice {
+                do {
+                    try configurePreferredInputDeviceIfNeeded(inputNode: inputNode)
+                } catch let audioError as AudioCaptureError {
+                    // Fall back to system default input and avoid repeating expensive failed selection attempts.
+                    onError?(audioError)
+                    shouldAttemptPreferredInputDevice = false
+                } catch {
+                    onError?(error)
+                    shouldAttemptPreferredInputDevice = false
+                }
             }
 
             var tapFormat = inputNode.inputFormat(forBus: 0)

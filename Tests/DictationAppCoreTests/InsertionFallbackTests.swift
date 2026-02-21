@@ -3,7 +3,7 @@ import Testing
 
 struct InsertionFallbackTests {
     @Test
-    func usesAccessibilityPathWhenPrimarySucceeds() {
+    func usesClipboardPathWhenClipboardSucceeds() {
         let direct = DirectInserterSpy(
             nextResult: .init(success: true, method: .accessibilityDirect, error: nil)
         )
@@ -18,18 +18,18 @@ struct InsertionFallbackTests {
         let result = writer.insert("hello")
 
         #expect(result.success == true)
-        #expect(result.method == .accessibilityDirect)
-        #expect(direct.callCount == 1)
-        #expect(fallback.callCount == 0)
+        #expect(result.method == .clipboardPaste)
+        #expect(direct.callCount == 0)
+        #expect(fallback.callCount == 1)
     }
 
     @Test
-    func usesClipboardFallbackWhenAccessibilityFails() {
+    func usesAccessibilityFallbackWhenClipboardFails() {
         let direct = DirectInserterSpy(
-            nextResult: .init(success: false, method: .accessibilityDirect, error: .noFocusedField)
+            nextResult: .init(success: true, method: .accessibilityDirect, error: nil)
         )
         let fallback = ClipboardInserterSpy(
-            nextResult: .init(success: true, method: .clipboardPaste, error: nil)
+            nextResult: .init(success: false, method: .clipboardPaste, error: .permissionDenied)
         )
         let writer = FocusedFieldWriter(
             directInserter: direct,
@@ -39,13 +39,13 @@ struct InsertionFallbackTests {
         let result = writer.insert("hello")
 
         #expect(result.success == true)
-        #expect(result.method == .clipboardPaste)
+        #expect(result.method == .accessibilityDirect)
         #expect(direct.callCount == 1)
         #expect(fallback.callCount == 1)
     }
 
     @Test
-    func returnsFallbackFailureWhenBothPathsFail() {
+    func returnsAccessibilityFailureWhenBothPathsFail() {
         let direct = DirectInserterSpy(
             nextResult: .init(success: false, method: .accessibilityDirect, error: .insertionFailed)
         )
@@ -60,13 +60,14 @@ struct InsertionFallbackTests {
         let result = writer.insert("hello")
 
         #expect(result.success == false)
-        #expect(result.method == .clipboardPaste)
-        #expect(result.error == .secureInputBlocked)
+        #expect(result.method == .accessibilityDirect)
+        #expect(result.error == .insertionFailed)
+        #expect(direct.callCount == 1)
         #expect(fallback.callCount == 1)
     }
 
     @Test
-    func doesNotFallbackForEngineError() {
+    func doesNotAttemptDirectPathWhenClipboardSucceeds() {
         let direct = DirectInserterSpy(
             nextResult: .init(success: false, method: .accessibilityDirect, error: .engineError)
         )
@@ -80,30 +81,11 @@ struct InsertionFallbackTests {
 
         let result = writer.insert("hello")
 
-        #expect(result.success == false)
-        #expect(result.error == .engineError)
-        #expect(fallback.callCount == 0)
-    }
-
-#if canImport(AppKit)
-    @Test
-    func terminalBundleForcesClipboardFallback() {
-        let direct = AccessibilityDirectInserter(frontmostBundleIdentifier: { "com.apple.Terminal" })
-        let fallback = ClipboardInserterSpy(
-            nextResult: .init(success: true, method: .clipboardPaste, error: nil)
-        )
-        let writer = FocusedFieldWriter(
-            directInserter: direct,
-            clipboardFallbackInserter: fallback
-        )
-
-        let result = writer.insert("hello")
-
         #expect(result.success == true)
         #expect(result.method == .clipboardPaste)
+        #expect(direct.callCount == 0)
         #expect(fallback.callCount == 1)
     }
-#endif
 }
 
 private final class DirectInserterSpy: AccessibilityDirectInserting {

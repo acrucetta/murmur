@@ -37,19 +37,19 @@ public final class FocusedFieldWriter: FocusedFieldWriting {
     }
 
     public func insert(_ text: String) -> InsertResult {
-        let primaryResult = directInserter.insertDirect(text)
-        guard !primaryResult.success else {
-            return primaryResult
+        let clipboardResult = clipboardFallbackInserter.paste(text)
+        if clipboardResult.success {
+            return clipboardResult
         }
 
-        guard shouldAttemptFallback(for: primaryResult.error) else {
-            return primaryResult
+        let directResult = directInserter.insertDirect(text)
+        guard shouldAttemptDirectFallback(for: clipboardResult.error) else {
+            return clipboardResult
         }
-
-        return clipboardFallbackInserter.paste(text)
+        return directResult
     }
 
-    private func shouldAttemptFallback(for error: FailureCode?) -> Bool {
+    private func shouldAttemptDirectFallback(for error: FailureCode?) -> Bool {
         guard let error else {
             return true
         }

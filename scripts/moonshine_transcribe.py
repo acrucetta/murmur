@@ -6,6 +6,7 @@ family) and falls back to ``moonshine_onnx`` if needed.
 """
 
 import argparse
+import os
 import pathlib
 import sys
 
@@ -49,6 +50,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vad-window-duration", type=float, default=None)
     parser.add_argument("--vad-hop-size", type=float, default=None)
     parser.add_argument("--vad-max-segment-duration", type=float, default=None)
+    parser.set_defaults(offline=True)
+    parser.add_argument(
+        "--offline",
+        dest="offline",
+        action="store_true",
+        help="Require local-only transcription and block network-backed model fetches (default).",
+    )
+    parser.add_argument(
+        "--allow-network",
+        dest="offline",
+        action="store_false",
+        help="Allow network-backed model fetches for missing assets.",
+    )
     return parser.parse_args()
 
 
@@ -95,7 +109,6 @@ def _infer_onnx_model(model_hint: str) -> str:
 def _transcribe_with_moonshine_voice(args: argparse.Namespace) -> str:
     from moonshine_voice import string_to_model_arch
     from moonshine_voice.download import (
-        download_model_from_info,
         find_model_info,
         get_components_for_model_info,
     )
@@ -112,6 +125,8 @@ def _transcribe_with_moonshine_voice(args: argparse.Namespace) -> str:
 
     if args.voice_model_path:
         model_path = str(pathlib.Path(args.voice_model_path).expanduser())
+        if not pathlib.Path(model_path).exists():
+            raise RuntimeError(f"voice model path not found: {model_path}")
     else:
         model_info = find_model_info(language=language, model_arch=model_arch)
         cache_dir = pathlib.Path(get_cache_dir())
@@ -121,6 +136,16 @@ def _transcribe_with_moonshine_voice(args: argparse.Namespace) -> str:
             model_path = str(model_root)
             model_arch = model_info["model_arch"]
         else:
+            if args.offline:
+                missing_components = [
+                    component for component in components if not (model_root / component).exists()
+                ]
+                raise RuntimeError(
+                    "offline mode: missing local Moonshine voice model assets at "
+                    f"{model_root} (missing: {', '.join(missing_components)})"
+                )
+            from moonshine_voice.download import download_model_from_info
+
             model_path, model_arch = download_model_from_info(model_info)
 
     options: dict[str, int | float] = {}
@@ -161,12 +186,19 @@ def _transcribe_with_moonshine_onnx(args: argparse.Namespace) -> str:
 
 def main() -> int:
     args = parse_args()
+    if args.offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
     wav_path = pathlib.Path(args.wav_path)
     if not wav_path.exists():
         print(f"ERROR: WAV file not found: {wav_path}", file=sys.stderr)
         return 2
 
-    backends = ["voice", "onnx"] if args.backend == "auto" else [args.backend]
+    if args.backend == "auto":
+        backends = ["voice"] if args.offline else ["voice", "onnx"]
+    else:
+        backends = [args.backend]
     errors: list[str] = []
 
     for backend in backends:

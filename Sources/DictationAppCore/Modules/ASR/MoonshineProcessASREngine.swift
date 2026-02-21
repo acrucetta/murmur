@@ -14,6 +14,7 @@ public final class MoonshineProcessASREngine: ASREngining {
 
     private let command: [String]
     private let model: String
+    private let offline: Bool
     private let runCommand: CommandRunner
     private let fileManager: FileManager
     private var bufferedSamples: [Float] = []
@@ -24,10 +25,12 @@ public final class MoonshineProcessASREngine: ASREngining {
     public init(
         command: [String],
         model: String = "moonshine/tiny",
+        offline: Bool = true,
         fileManager: FileManager = .default
     ) {
         self.command = command
         self.model = model
+        self.offline = offline
         self.runCommand = MoonshineProcessASREngine.defaultRunCommand
         self.fileManager = fileManager
     }
@@ -35,11 +38,13 @@ public final class MoonshineProcessASREngine: ASREngining {
     public init(
         command: [String],
         model: String = "moonshine/tiny",
+        offline: Bool = true,
         runCommand: @escaping CommandRunner,
         fileManager: FileManager = .default
     ) {
         self.command = command
         self.model = model
+        self.offline = offline
         self.runCommand = runCommand
         self.fileManager = fileManager
     }
@@ -73,7 +78,10 @@ public final class MoonshineProcessASREngine: ASREngining {
             defer { try? fileManager.removeItem(at: wavURL) }
 
             let executable = command[0]
-            let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
+            var arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
+            if offline {
+                arguments.append("--offline")
+            }
             let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !output.isEmpty else {
@@ -99,7 +107,10 @@ public final class MoonshineProcessASREngine: ASREngining {
 
         do {
             let executable = command[0]
-            let arguments = Array(command.dropFirst()) + [path, "--model", model]
+            var arguments = Array(command.dropFirst()) + [path, "--model", model]
+            if offline {
+                arguments.append("--offline")
+            }
             let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else {
                 lastError = .emptyTranscription

@@ -21,6 +21,20 @@ public struct TextPostProcessorV2: TextPostProcessing {
 
     private static let sentenceBoundaryPunctuation: Set<Character> = [".", "!", "?"]
     private static let clauseBoundaryPunctuation: Set<Character> = [".", "!", "?", ",", ";", ":"]
+    private static let discourseSentenceBreakWords: Set<String> = [
+        "so", "but", "then", "however", "therefore", "anyway", "meanwhile"
+    ]
+    private static let acronymMap: [String: String] = [
+        "llm": "LLM",
+        "api": "API",
+        "ui": "UI",
+        "ux": "UX",
+        "asr": "ASR",
+        "cpu": "CPU",
+        "gpu": "GPU",
+        "macos": "macOS",
+        "ios": "iOS",
+    ]
     private static let spokenSymbolMarkers: [([String], String)] = [
         (["exclamation", "mark"], "!"),
         (["exclamation", "point"], "!"),
@@ -52,7 +66,9 @@ public struct TextPostProcessorV2: TextPostProcessing {
         case .smart:
             let repaired = applyRepairMarkers(symbolAware)
             let deduped = collapseRepetitions(repaired)
-            processed = joinTokens(deduped)
+            let sentenceAware = applyDiscourseSentenceBreaks(deduped)
+            let normalizedCase = normalizeSmartCase(sentenceAware)
+            processed = joinTokens(normalizedCase)
         }
 
         return finalizeSentence(processed)
@@ -217,6 +233,124 @@ public struct TextPostProcessorV2: TextPostProcessing {
         }
 
         return result
+    }
+
+    private func applyDiscourseSentenceBreaks(_ tokens: [String]) -> [String] {
+        guard tokens.count >= 4 else {
+            return tokens
+        }
+
+        var result: [String] = []
+        result.reserveCapacity(tokens.count + 2)
+        var wordsSinceSentenceBoundary = 0
+
+        for token in tokens {
+            let canonical = canonicalToken(token)
+            let shouldBreakBeforeToken = Self.discourseSentenceBreakWords.contains(canonical)
+                && wordsSinceSentenceBoundary >= 10
+                && !(result.last.map(isClauseBoundary) ?? true)
+
+            if shouldBreakBeforeToken {
+                result.append(".")
+                wordsSinceSentenceBoundary = 0
+            }
+
+            result.append(token)
+            if !canonical.isEmpty {
+                wordsSinceSentenceBoundary += 1
+            }
+            if isSentenceBoundaryToken(token) {
+                wordsSinceSentenceBoundary = 0
+            }
+        }
+
+        return result
+    }
+
+    private func normalizeSmartCase(_ tokens: [String]) -> [String] {
+        var result: [String] = []
+        result.reserveCapacity(tokens.count)
+        var isSentenceStart = true
+
+        for token in tokens {
+            let normalized = normalizeSmartCase(token: token, isSentenceStart: isSentenceStart)
+            result.append(normalized)
+            isSentenceStart = isSentenceBoundaryToken(token)
+        }
+
+        return result
+    }
+
+    private func normalizeSmartCase(token: String, isSentenceStart: Bool) -> String {
+        let parts = splitTokenForCaseNormalization(token)
+        guard !parts.core.isEmpty else {
+            return token
+        }
+
+        let canonical = parts.core.lowercased()
+        let normalizedCore: String
+
+        if let acronym = Self.acronymMap[canonical] {
+            normalizedCore = acronym
+        } else if canonical == "i" {
+            normalizedCore = "I"
+        } else if canonical.hasPrefix("i'") {
+            normalizedCore = "I" + canonical.dropFirst()
+        } else if shouldPreserveOriginalCase(parts.core) {
+            normalizedCore = parts.core
+        } else if isSentenceStart {
+            normalizedCore = capitalizeWord(canonical)
+        } else {
+            normalizedCore = canonical
+        }
+
+        return parts.prefix + normalizedCore + parts.suffix
+    }
+
+    private func splitTokenForCaseNormalization(_ token: String) -> (prefix: String, core: String, suffix: String) {
+        guard let start = token.firstIndex(where: isWordCharacter),
+              let end = token.lastIndex(where: isWordCharacter),
+              start <= end
+        else {
+            return (token, "", "")
+        }
+
+        let prefix = String(token[..<start])
+        let core = String(token[start...end])
+        let suffixStart = token.index(after: end)
+        let suffix = suffixStart < token.endIndex ? String(token[suffixStart...]) : ""
+        return (prefix, core, suffix)
+    }
+
+    private func isWordCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "'" || character == "’" || character == "-"
+    }
+
+    private func shouldPreserveOriginalCase(_ token: String) -> Bool {
+        if token.rangeOfCharacter(from: .decimalDigits) != nil {
+            return true
+        }
+
+        let uppercaseCount = token.unicodeScalars.filter { CharacterSet.uppercaseLetters.contains($0) }.count
+        if uppercaseCount >= 2 {
+            return true
+        }
+
+        return false
+    }
+
+    private func capitalizeWord(_ token: String) -> String {
+        guard let first = token.first else {
+            return token
+        }
+        return String(first).uppercased() + token.dropFirst()
+    }
+
+    private func isSentenceBoundaryToken(_ token: String) -> Bool {
+        guard let last = token.last else {
+            return false
+        }
+        return Self.sentenceBoundaryPunctuation.contains(last)
     }
 
     private func shouldDropDuplicate(_ canonical: String, runLength: Int) -> Bool {

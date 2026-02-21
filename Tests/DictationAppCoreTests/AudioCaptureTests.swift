@@ -15,4 +15,14 @@ struct AudioCaptureTests {
 
         #expect(received == [frame])
     }
+
+    @Test
+    func audioCaptureErrorHasActionableDescriptions() {
+        let missing = AudioCaptureError.inputDeviceNotFound("Mic-1")
+        let failedSet = AudioCaptureError.failedToSetInputDevice(-50)
+
+        #expect(missing.localizedDescription.contains("preferred input device not found"))
+        #expect(missing.localizedDescription.contains("Mic-1"))
+        #expect(failedSet.localizedDescription.contains("osstatus:-50"))
+    }
 }
