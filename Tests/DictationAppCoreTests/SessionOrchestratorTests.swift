@@ -666,6 +666,86 @@ struct SessionOrchestratorTests {
     }
 
     @Test
+    func smartRewriteRoutingExamplesForRealisticRequests() {
+        struct ExampleCase {
+            let name: String
+            let transcript: String
+            let sampleAmplitude: Float
+            let shouldUseLLM: Bool
+        }
+
+        let examples: [ExampleCase] = [
+            .init(
+                name: "clean_short_request_skips",
+                transcript: "Please send the notes to Sarah by 3 PM",
+                sampleAmplitude: 0.08,
+                shouldUseLLM: false
+            ),
+            .init(
+                name: "long_run_on_without_internal_boundaries_uses_llm",
+                transcript: "Please draft an update for the revenue forecast for next quarter including pipeline assumptions dependency risks hiring plans legal constraints customer rollout sequencing mitigation steps ownership details and a rollout checklist for each team before thursday afternoon",
+                sampleAmplitude: 0.08,
+                shouldUseLLM: true
+            ),
+            .init(
+                name: "very_low_capture_quality_uses_llm",
+                transcript: "this is already easy to read and should stay local",
+                sampleAmplitude: 0.005,
+                shouldUseLLM: true
+            ),
+            .init(
+                name: "user_style_long_phrase_skips_after_local_cleanup",
+                transcript: "Although when I think about it seems like the first record of The audio is very close to what the llm does after So maybe Let's try Seeing if we can clean up the text a bit more and skip the calls to the llm only when we have low confidence",
+                sampleAmplitude: 0.08,
+                shouldUseLLM: false
+            ),
+        ]
+
+        let processor = TextPostProcessorV2(mode: .smart)
+
+        for example in examples {
+            let asr = FakeASREngine()
+            asr.nextFinalTranscript = .init(text: example.transcript, confidence: 0.9)
+            let writer = FakeFieldWriter()
+            let rewriter = EchoRewriteSpy()
+            let logger = LoggerSpy()
+            let contextProvider = FixedRewriteContextProvider(
+                context: .init(
+                    frontmostAppBundleID: "com.apple.mail",
+                    frontmostAppName: "Mail",
+                    mode: "smart"
+                )
+            )
+
+            let orchestrator = SessionOrchestrator(
+                permissionManager: FakePermissionManager(snapshot: .allGranted),
+                audioCapture: FakeAudioCapture(),
+                asrEngine: asr,
+                postProcessor: TextPostProcessorV2(mode: .smart),
+                transcriptRewriter: rewriter,
+                rewriteContextProvider: contextProvider,
+                fieldWriter: writer,
+                statusUI: StatusUISpy(),
+                logger: logger
+            )
+
+            orchestrator.handle(.shortcutPressed(.init(timestamp: Date())))
+            orchestrator.handle(
+                .audioFrame(.init(samples: Array(repeating: example.sampleAmplitude, count: 8_000), sampleRate: 16_000, channels: 1))
+            )
+            orchestrator.handle(.shortcutReleased(.init(timestamp: Date())))
+
+            let cleaned = processor.clean(example.transcript)
+            let usedLLM = rewriter.callCount == 1
+            let expectedInserted = example.shouldUseLLM ? "[LLM] \(cleaned)" : cleaned
+
+            #expect(usedLLM == example.shouldUseLLM, "example \(example.name) route mismatch")
+            #expect(writer.lastInsertedText == expectedInserted, "example \(example.name) inserted_text mismatch")
+            #expect(logger.messages.contains(where: { $0.hasPrefix("smart_rewrite_need score=") }))
+        }
+    }
+
+    @Test
     func insertionFailureIsLoggedWithMethodAndCode() {
         let asr = FakeASREngine()
         asr.nextFinalTranscript = .init(text: "hello", confidence: 0.9)
@@ -807,6 +887,15 @@ private final class RewriteSpy: TranscriptRewriting {
         lastInput = text
         lastContext = context
         return nextResult
+    }
+}
+
+private final class EchoRewriteSpy: TranscriptRewriting {
+    var callCount = 0
+
+    func rewrite(_ text: String, context _: RewriteContext) -> String? {
+        callCount += 1
+        return "[LLM] \(text)"
     }
 }
 
