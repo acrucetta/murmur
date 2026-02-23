@@ -161,6 +161,7 @@ Config precedence:
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
 - When enabled, Murmur will best-effort pause/resume Music and Spotify while recording is active.
+- In menu-bar runtime, changing this setting in the menu applies immediately (no app restart needed).
 - You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
 
 Microphone selection:
@@ -193,6 +194,7 @@ Common filters:
 rg "metric release_to_(final|insert)_ms=" /tmp/murmur-menubar.log
 rg "metric insert_(text|result)" /tmp/murmur-menubar.log
 rg "metric smart_rewrite_" /tmp/murmur-menubar.log
+rg "metric media_control_" /tmp/murmur-menubar.log
 rg "level=info warning=" /tmp/murmur-menubar.log
 ```
 

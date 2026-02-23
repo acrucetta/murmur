@@ -463,6 +463,7 @@ private final class MenuBarRuntime {
     private let overlayController: RecordingOverlayController
     private let overlayPreviewState: OverlayPreviewState?
     private let configStore: MurmurConfigStore
+    private let recordingMediaController: SwitchableRecordingMediaController
     private var menuConfigSnapshot: MenuBarConfigSnapshot
 
     init(
@@ -531,14 +532,13 @@ private final class MenuBarRuntime {
                 }
             }
         )
-        let recordingMediaController: RecordingMediaControlling
-        if pauseMediaWhileRecording {
-            recordingMediaController = AppRecordingMediaController(logger: logger)
-            logger.log("pause_media_while_recording enabled=true")
-        } else {
-            recordingMediaController = NoopRecordingMediaController()
-            logger.log("pause_media_while_recording enabled=false")
-        }
+        let initialRecordingMediaController = Self.makeRecordingMediaController(
+            enabled: pauseMediaWhileRecording,
+            logger: logger
+        )
+        let recordingMediaController = SwitchableRecordingMediaController(
+            initialController: initialRecordingMediaController
+        )
         if let preferredMicrophone {
             logger.log("microphone_selected value=\"\(escapeLogValue(preferredMicrophone))\"")
         } else {
@@ -598,6 +598,7 @@ private final class MenuBarRuntime {
         self.bridge = bridge
         self.overlayController = overlayController
         self.configStore = configStore
+        self.recordingMediaController = recordingMediaController
         menuConfigSnapshot = initialMenuConfigSnapshot
 
         statusUI.onError = { error in
@@ -689,6 +690,12 @@ private final class MenuBarRuntime {
                 try configStore.persistPauseMediaWhileRecording(enabled)
                 menuConfigSnapshot.pauseMediaWhileRecording = enabled
                 logger.log("menu_settings_updated key=pause_media_while_recording value=\(enabled)")
+                if !enabled {
+                    recordingMediaController.resumeMediaAfterRecording()
+                }
+                recordingMediaController.setController(
+                    Self.makeRecordingMediaController(enabled: enabled, logger: logger)
+                )
             case .setPreferredMicrophone(let microphone):
                 try configStore.persistPreferredMicrophone(microphone)
                 menuConfigSnapshot.preferredMicrophone = microphone
@@ -735,6 +742,18 @@ private final class MenuBarRuntime {
         } catch {
             logger.log("menu_settings_auto_clear_failed key=microphone error=\"\(escapeLogValue(error.localizedDescription))\"")
         }
+    }
+
+    private static func makeRecordingMediaController(
+        enabled: Bool,
+        logger: Logging
+    ) -> RecordingMediaControlling {
+        if enabled {
+            logger.log("pause_media_while_recording enabled=true")
+            return AppleScriptRecordingMediaController(logger: logger)
+        }
+        logger.log("pause_media_while_recording enabled=false")
+        return NoopRecordingMediaController()
     }
 }
 
@@ -1711,121 +1730,6 @@ private enum FeedbackSoundLibrary {
     }
 }
 
-private final class AppRecordingMediaController: RecordingMediaControlling, @unchecked Sendable {
-    private enum Player: String, CaseIterable, Hashable {
-        case music = "Music"
-        case spotify = "Spotify"
-    }
-
-    private let queue = DispatchQueue(label: "murmur.recording.media")
-    private let logger: Logging
-    private var pausedPlayers: Set<Player> = []
-
-    init(logger: Logging) {
-        self.logger = logger
-    }
-
-    func pauseMediaForRecording() {
-        queue.async {
-            self.pausedPlayers.removeAll(keepingCapacity: true)
-            for player in Player.allCases {
-                if self.pauseIfNeeded(player: player) {
-                    self.pausedPlayers.insert(player)
-                }
-            }
-        }
-    }
-
-    func resumeMediaAfterRecording() {
-        queue.async {
-            let playersToResume = self.pausedPlayers
-            self.pausedPlayers.removeAll(keepingCapacity: true)
-            for player in playersToResume {
-                self.resume(player: player)
-            }
-        }
-    }
-
-    private func pauseIfNeeded(player: Player) -> Bool {
-        let output = runAppleScript(
-            """
-            try
-                if application "\(player.rawValue)" is running then
-                    tell application "\(player.rawValue)"
-                        if player state is playing then
-                            pause
-                            return "paused"
-                        end if
-                    end tell
-                end if
-            on error
-                return "noop"
-            end try
-            return "noop"
-            """
-        )
-        return output == "paused"
-    }
-
-    private func resume(player: Player) {
-        _ = runAppleScript(
-            """
-            try
-                if application "\(player.rawValue)" is running then
-                    tell application "\(player.rawValue)" to play
-                end if
-            on error
-            end try
-            return "done"
-            """
-        )
-    }
-
-    private func runAppleScript(_ script: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            logger.log("media_control_runner_failed error=\"\(escapeLogValue(error.localizedDescription))\"")
-            return nil
-        }
-
-        guard process.terminationStatus == 0 else {
-            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-            if let errorText = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                !errorText.isEmpty
-            {
-                logger.log(
-                    "media_control_script_failed status=\(process.terminationStatus) details=\"\(escapeLogValue(errorText))\""
-                )
-            }
-            return nil
-        }
-
-        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return output?.isEmpty == true ? nil : output
-    }
-
-    private func escapeLogValue(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-    }
-}
 
 private final class AppFeedbackPresenter: FeedbackPresenting {
     private let onRecordingStarted: (@MainActor () -> Void)?
