@@ -160,7 +160,7 @@ Config precedence:
 
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
-- When enabled, Murmur will best-effort pause/resume Music and Spotify while recording is active.
+- When enabled, Murmur will best-effort pause/resume Music, Spotify, and active browser-tab media (Chrome, Arc, Safari) while recording is active.
 - In menu-bar runtime, changing this setting in the menu applies immediately (no app restart needed).
 - You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
 

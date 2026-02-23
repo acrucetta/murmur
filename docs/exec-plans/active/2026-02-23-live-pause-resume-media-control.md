@@ -33,11 +33,12 @@ Pause-media mode should hard pause active playback during dictation and resume a
 ## Result Summary (to fill at completion)
 - Implemented:
   - Added `AppleScriptRecordingMediaController` in `DictationAppCore` with explicit pause/resume scripts, scoped resume-only behavior, and media-control logs.
+  - Extended media control to browser playback in active tabs for Google Chrome, Arc, and Safari (pause on start, resume on stop when paused by Murmur).
   - Added `SwitchableRecordingMediaController` so media-control strategy can be swapped at runtime.
   - Updated menu-bar runtime to use the switchable controller and apply pause-media toggles immediately without restart.
-  - Added tests for pause/resume routing and controller swapping.
+  - Added tests for player pause/resume routing, browser pause/resume routing, and controller swapping.
 - Verification run:
-  - `swift test --filter AppleScriptRecordingMediaControllerTests --filter SwitchableRecordingMediaControllerTests` (pass)
+  - `swift test --filter AppleScriptRecordingMediaControllerTests --filter SwitchableRecordingMediaControllerTests` (pass, 3 tests)
   - `swift test --filter SessionOrchestratorTests` (pass)
   - `swift build --product MurmurMenuBarApp` (pass)
   - Live AppleScript smoke:

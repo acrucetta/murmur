@@ -9,11 +9,29 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         case spotify = "Spotify"
     }
 
+    private enum BrowserPlayer: String, CaseIterable, Hashable {
+        case chrome = "Google Chrome"
+        case arc = "Arc"
+        case safari = "Safari"
+
+        var logName: String {
+            switch self {
+            case .chrome:
+                return "chrome"
+            case .arc:
+                return "arc"
+            case .safari:
+                return "safari"
+            }
+        }
+    }
+
     private let queue = DispatchQueue(label: "murmur.recording.media")
     private let logger: Logging
     private let dispatchAsync: DispatchAsync
     private let scriptRunner: ScriptRunner
     private var pausedPlayers: Set<Player> = []
+    private var pausedBrowserPlayers: Set<BrowserPlayer> = []
 
     public init(
         logger: Logging,
@@ -34,9 +52,15 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
     public func pauseMediaForRecording() {
         dispatchAsync {
             self.pausedPlayers.removeAll(keepingCapacity: true)
+            self.pausedBrowserPlayers.removeAll(keepingCapacity: true)
             for player in Player.allCases {
                 if self.pauseIfNeeded(player: player) {
                     self.pausedPlayers.insert(player)
+                }
+            }
+            for browser in BrowserPlayer.allCases {
+                if self.pauseIfNeeded(browser: browser) {
+                    self.pausedBrowserPlayers.insert(browser)
                 }
             }
         }
@@ -45,9 +69,14 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
     public func resumeMediaAfterRecording() {
         dispatchAsync {
             let playersToResume = self.pausedPlayers
+            let browsersToResume = self.pausedBrowserPlayers
             self.pausedPlayers.removeAll(keepingCapacity: true)
+            self.pausedBrowserPlayers.removeAll(keepingCapacity: true)
             for player in playersToResume {
                 self.resume(player: player)
+            }
+            for browser in browsersToResume {
+                self.resume(browser: browser)
             }
         }
     }
@@ -85,6 +114,23 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         return false
     }
 
+    private func pauseIfNeeded(browser: BrowserPlayer) -> Bool {
+        let output = scriptRunner(pauseScript(for: browser))
+
+        if let output, output.hasPrefix("error:") {
+            logger.log("media_control_pause_error player=\(browser.logName) details=\"\(escapeLogValue(output))\"")
+            return false
+        }
+
+        if output == "paused" {
+            logger.log("media_control_paused player=\(browser.logName)")
+            return true
+        }
+
+        logger.log("media_control_pause_noop player=\(browser.logName)")
+        return false
+    }
+
     private func resume(player: Player) {
         let output = scriptRunner(
             """
@@ -115,6 +161,124 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         }
 
         logger.log("media_control_resume_noop player=\(player.rawValue.lowercased())")
+    }
+
+    private func resume(browser: BrowserPlayer) {
+        let output = scriptRunner(resumeScript(for: browser))
+
+        if let output, output.hasPrefix("error:") {
+            logger.log("media_control_resume_error player=\(browser.logName) details=\"\(escapeLogValue(output))\"")
+            return
+        }
+
+        if output == "resumed" {
+            logger.log("media_control_resumed player=\(browser.logName)")
+            return
+        }
+
+        logger.log("media_control_resume_noop player=\(browser.logName)")
+    }
+
+    private func pauseScript(for browser: BrowserPlayer) -> String {
+        switch browser {
+        case .chrome, .arc:
+            return pauseChromiumScript(applicationName: browser.rawValue)
+        case .safari:
+            return pauseSafariScript()
+        }
+    }
+
+    private func resumeScript(for browser: BrowserPlayer) -> String {
+        switch browser {
+        case .chrome, .arc:
+            return resumeChromiumScript(applicationName: browser.rawValue)
+        case .safari:
+            return resumeSafariScript()
+        }
+    }
+
+    private func pauseChromiumScript(applicationName: String) -> String {
+        """
+        try
+            if application "\(applicationName)" is running then
+                tell application "\(applicationName)"
+                    if (count of windows) > 0 then
+                        set activeTab to active tab of front window
+                        set pauseResult to execute activeTab javascript "(() => { const media = document.querySelector('video, audio'); if (media && !media.paused) { media.pause(); return 'paused'; } return 'noop'; })();"
+                        if pauseResult is "paused" then
+                            return "paused"
+                        end if
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
+    }
+
+    private func resumeChromiumScript(applicationName: String) -> String {
+        """
+        try
+            if application "\(applicationName)" is running then
+                tell application "\(applicationName)"
+                    if (count of windows) > 0 then
+                        set activeTab to active tab of front window
+                        set resumeResult to execute activeTab javascript "(() => { const media = document.querySelector('video, audio'); if (media && media.paused) { media.play(); return 'resumed'; } return 'noop'; })();"
+                        if resumeResult is "resumed" then
+                            return "resumed"
+                        end if
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
+    }
+
+    private func pauseSafariScript() -> String {
+        """
+        try
+            if application "Safari" is running then
+                tell application "Safari"
+                    if (count of windows) > 0 then
+                        set activeTab to current tab of front window
+                        set pauseResult to do JavaScript "(() => { const media = document.querySelector('video, audio'); if (media && !media.paused) { media.pause(); return 'paused'; } return 'noop'; })();" in activeTab
+                        if pauseResult is "paused" then
+                            return "paused"
+                        end if
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
+    }
+
+    private func resumeSafariScript() -> String {
+        """
+        try
+            if application "Safari" is running then
+                tell application "Safari"
+                    if (count of windows) > 0 then
+                        set activeTab to current tab of front window
+                        set resumeResult to do JavaScript "(() => { const media = document.querySelector('video, audio'); if (media && media.paused) { media.play(); return 'resumed'; } return 'noop'; })();" in activeTab
+                        if resumeResult is "resumed" then
+                            return "resumed"
+                        end if
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
     }
 
     private static func runAppleScript(_ script: String, logger: Logging) -> String? {

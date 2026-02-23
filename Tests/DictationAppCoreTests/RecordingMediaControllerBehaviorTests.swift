@@ -45,6 +45,38 @@ struct AppleScriptRecordingMediaControllerTests {
         #expect(pauseCalls == ["music", "spotify"])
         #expect(resumeCalls == ["music"])
     }
+
+    @Test
+    func pausesAndResumesBrowserPlaybackWhenMediaElementIsActive() {
+        var pauseCalls: [String] = []
+        var resumeCalls: [String] = []
+
+        let controller = AppleScriptRecordingMediaController(
+            logger: NoopLogger(),
+            dispatchAsync: { work in work() },
+            scriptRunner: { script in
+                if script.contains("tell application \"Google Chrome\""),
+                   script.contains("media.pause()")
+                {
+                    pauseCalls.append("chrome")
+                    return "paused"
+                }
+                if script.contains("tell application \"Google Chrome\""),
+                   script.contains("media.play()")
+                {
+                    resumeCalls.append("chrome")
+                    return "resumed"
+                }
+                return "noop"
+            }
+        )
+
+        controller.pauseMediaForRecording()
+        controller.resumeMediaAfterRecording()
+
+        #expect(pauseCalls == ["chrome"])
+        #expect(resumeCalls == ["chrome"])
+    }
 }
 
 struct SwitchableRecordingMediaControllerTests {
