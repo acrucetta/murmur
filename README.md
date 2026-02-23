@@ -160,14 +160,9 @@ Config precedence:
 
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
-- When enabled, Murmur will best-effort pause/resume Music, Spotify, and active browser-tab media (Chrome, Arc, Safari) while recording is active.
-- Murmur also snapshots system output volume, sets it to `0` while recording, then restores the prior volume/mute state on release.
+- When enabled, Murmur uses a deterministic volume strategy: snapshot current output volume/mute, set output volume to `0` while recording, then restore prior volume/mute on release.
 - In menu-bar runtime, changing this setting in the menu applies immediately (no app restart needed).
 - You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
-- Browser automation prerequisites:
-  - Chrome: enable `View -> Developer -> Allow JavaScript from Apple Events`.
-  - Safari: enable `Develop -> Allow JavaScript from Apple Events`.
-  - macOS may also prompt to allow Murmur to control browser apps via Automation permissions.
 
 Microphone selection:
 - Optional setting: `microphone` (`system_default` by default).

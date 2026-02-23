@@ -3,38 +3,24 @@ import Testing
 
 struct AppleScriptRecordingMediaControllerTests {
     @Test
-    func pausesOnlyActivePlayersAndResumesOnlyThosePausedByController() {
-        var pauseCalls: [String] = []
-        var resumeCalls: [String] = []
+    func volumeOnlyModeDoesNotSendAppOrBrowserPauseScripts() {
+        var sawAppOrBrowserControlScript = false
 
         let controller = AppleScriptRecordingMediaController(
             logger: NoopLogger(),
             dispatchAsync: { work in work() },
             scriptRunner: { script in
-                if script.contains("tell application \"Music\""),
-                   script.contains("if player state is playing then")
+                if script.contains("tell application \"Music\"")
+                    || script.contains("tell application \"Spotify\"")
+                    || script.contains("tell application \"Google Chrome\"")
+                    || script.contains("tell application \"Arc\"")
+                    || script.contains("tell application \"Safari\"")
                 {
-                    pauseCalls.append("music")
-                    return "paused"
+                    sawAppOrBrowserControlScript = true
                 }
-                if script.contains("tell application \"Spotify\""),
-                   script.contains("if player state is playing then")
-                {
-                    pauseCalls.append("spotify")
-                    return "noop"
-                }
-                if script.contains("tell application \"Music\""),
-                   script.contains("if player state is paused then")
-                {
-                    resumeCalls.append("music")
-                    return "resumed"
-                }
-                if script.contains("tell application \"Spotify\""),
-                   script.contains("if player state is paused then")
-                {
-                    resumeCalls.append("spotify")
-                    return "resumed"
-                }
+                if script.contains("output volume of (get volume settings)") { return "37|false" }
+                if script.contains("set volume output volume 0") { return "muted" }
+                if script.contains("set volume output volume 37 output muted false") { return "restored" }
                 return "noop"
             }
         )
@@ -42,43 +28,7 @@ struct AppleScriptRecordingMediaControllerTests {
         controller.pauseMediaForRecording()
         controller.resumeMediaAfterRecording()
 
-        #expect(pauseCalls == ["music", "spotify"])
-        #expect(resumeCalls == ["music"])
-    }
-
-    @Test
-    func pausesAndResumesBrowserPlaybackWhenMediaElementIsActive() {
-        var pauseCalls: [String] = []
-        var resumeCalls: [String] = []
-        var resumeContainsYouTubeFallback = false
-
-        let controller = AppleScriptRecordingMediaController(
-            logger: NoopLogger(),
-            dispatchAsync: { work in work() },
-            scriptRunner: { script in
-                if script.contains("tell application \"Google Chrome\""),
-                   script.contains("media.pause()")
-                {
-                    pauseCalls.append("chrome")
-                    return "paused"
-                }
-                if script.contains("tell application \"Google Chrome\""),
-                   script.contains("media.play()")
-                {
-                    resumeCalls.append("chrome")
-                    resumeContainsYouTubeFallback = script.contains("ytp-play-button")
-                    return "resumed"
-                }
-                return "noop"
-            }
-        )
-
-        controller.pauseMediaForRecording()
-        controller.resumeMediaAfterRecording()
-
-        #expect(pauseCalls == ["chrome"])
-        #expect(resumeCalls == ["chrome"])
-        #expect(resumeContainsYouTubeFallback == true)
+        #expect(sawAppOrBrowserControlScript == false)
     }
 
     @Test
