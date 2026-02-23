@@ -196,6 +196,18 @@ rg "metric smart_rewrite_" /tmp/murmur-menubar.log
 rg "level=info warning=" /tmp/murmur-menubar.log
 ```
 
+## History and Clipboard Behavior
+
+Murmur stores local completion history in system files under:
+
+- `~/Library/Application Support/Murmur/transcriptions/YYYY-MM-DD.txt` (daily entries)
+- `~/Library/Application Support/Murmur/transcriptions/completions.log` (append-only completion log)
+
+Clipboard fallback behavior:
+
+- When Murmur uses clipboard paste insertion, the dictated text remains on the clipboard after paste.
+- This allows clipboard history tools to retain the inserted dictation text.
+
 ## CLI Reference
 
 ```bash
