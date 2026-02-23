@@ -202,12 +202,19 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         try
             if application "\(applicationName)" is running then
                 tell application "\(applicationName)"
-                    if (count of windows) > 0 then
-                        set activeTab to active tab of front window
-                        set pauseResult to execute activeTab javascript "(() => { const media = document.querySelector('video, audio'); if (media && !media.paused) { media.pause(); return 'paused'; } return 'noop'; })();"
-                        if pauseResult is "paused" then
-                            return "paused"
-                        end if
+                    set didPause to false
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            try
+                                set pauseResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();"
+                                if pauseResult is "paused" then
+                                    set didPause to true
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                    if didPause then
+                        return "paused"
                     end if
                 end tell
             end if
@@ -223,12 +230,19 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         try
             if application "\(applicationName)" is running then
                 tell application "\(applicationName)"
-                    if (count of windows) > 0 then
-                        set activeTab to active tab of front window
-                        set resumeResult to execute activeTab javascript "(() => { const media = document.querySelector('video, audio'); if (media && media.paused) { media.play(); return 'resumed'; } return 'noop'; })();"
-                        if resumeResult is "resumed" then
-                            return "resumed"
-                        end if
+                    set didResume to false
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            try
+                                set resumeResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();"
+                                if resumeResult is "resumed" then
+                                    set didResume to true
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                    if didResume then
+                        return "resumed"
                     end if
                 end tell
             end if
@@ -244,12 +258,19 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         try
             if application "Safari" is running then
                 tell application "Safari"
-                    if (count of windows) > 0 then
-                        set activeTab to current tab of front window
-                        set pauseResult to do JavaScript "(() => { const media = document.querySelector('video, audio'); if (media && !media.paused) { media.pause(); return 'paused'; } return 'noop'; })();" in activeTab
-                        if pauseResult is "paused" then
-                            return "paused"
-                        end if
+                    set didPause to false
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            try
+                                set pauseResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();" in t
+                                if pauseResult is "paused" then
+                                    set didPause to true
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                    if didPause then
+                        return "paused"
                     end if
                 end tell
             end if
@@ -265,12 +286,19 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         try
             if application "Safari" is running then
                 tell application "Safari"
-                    if (count of windows) > 0 then
-                        set activeTab to current tab of front window
-                        set resumeResult to do JavaScript "(() => { const media = document.querySelector('video, audio'); if (media && media.paused) { media.play(); return 'resumed'; } return 'noop'; })();" in activeTab
-                        if resumeResult is "resumed" then
-                            return "resumed"
-                        end if
+                    set didResume to false
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            try
+                                set resumeResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();" in t
+                                if resumeResult is "resumed" then
+                                    set didResume to true
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                    if didResume then
+                        return "resumed"
                     end if
                 end tell
             end if
