@@ -34,6 +34,10 @@ Pause-media mode should hard pause active playback during dictation and resume a
 - Implemented:
   - Added `AppleScriptRecordingMediaController` in `DictationAppCore` with explicit pause/resume scripts, scoped resume-only behavior, and media-control logs.
   - Extended media control to browser playback in active tabs for Google Chrome, Arc, and Safari (pause on start, resume on stop when paused by Murmur).
+  - Added deterministic output-volume fallback:
+    - snapshot output volume/mute on recording start,
+    - set output volume to `0` during recording,
+    - restore prior volume/mute on recording stop.
   - Improved browser scripting reliability by:
     - scanning all tabs for Chrome/Safari,
     - using active-tab control for Arc to avoid tab-type coercion errors,
@@ -42,12 +46,13 @@ Pause-media mode should hard pause active playback during dictation and resume a
   - Updated menu-bar runtime to use the switchable controller and apply pause-media toggles immediately without restart.
   - Added tests for player pause/resume routing, browser pause/resume routing, and controller swapping.
 - Verification run:
-  - `swift test --filter AppleScriptRecordingMediaControllerTests --filter SwitchableRecordingMediaControllerTests` (pass, 3 tests)
+  - `swift test --filter AppleScriptRecordingMediaControllerTests --filter SwitchableRecordingMediaControllerTests` (pass, 4 tests)
   - `swift test --filter SessionOrchestratorTests` (pass)
   - `swift build --product MurmurMenuBarApp` (pass)
   - Live AppleScript smoke:
     - `osascript` Music pause script returned `noop` when Music not running.
     - `osascript` Spotify pause script returned `noop` when Spotify not running.
+    - `osascript` volume snapshot/mute/restore flow succeeded (`before=50,false during=0 after=50,false`).
 - Residual risks:
   - Live end-to-end pause/resume still depends on macOS Automation permissions for Music/Spotify and requires one of those players actively playing.
   - Browser/tab media sessions remain out of scope for this controller.

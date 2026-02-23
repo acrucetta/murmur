@@ -32,6 +32,8 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
     private let scriptRunner: ScriptRunner
     private var pausedPlayers: Set<Player> = []
     private var pausedBrowserPlayers: Set<BrowserPlayer> = []
+    private var preRecordingOutputVolume: Int?
+    private var preRecordingOutputMuted: Bool?
 
     public init(
         logger: Logging,
@@ -53,6 +55,7 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
         dispatchAsync {
             self.pausedPlayers.removeAll(keepingCapacity: true)
             self.pausedBrowserPlayers.removeAll(keepingCapacity: true)
+            self.captureAndMuteSystemOutputVolumeIfPossible()
             for player in Player.allCases {
                 if self.pauseIfNeeded(player: player) {
                     self.pausedPlayers.insert(player)
@@ -78,6 +81,7 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
             for browser in browsersToResume {
                 self.resume(browser: browser)
             }
+            self.restoreSystemOutputVolumeIfNeeded()
         }
     }
 
@@ -112,6 +116,98 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
 
         logger.log("media_control_pause_noop player=\(player.rawValue.lowercased())")
         return false
+    }
+
+    private func captureAndMuteSystemOutputVolumeIfPossible() {
+        let output = scriptRunner(
+            """
+            try
+                set currentVolume to output volume of (get volume settings)
+                set isMuted to output muted of (get volume settings)
+                return (currentVolume as string) & "|" & (isMuted as string)
+            on error errMsg number errNum
+                return "error:" & errNum & ":" & errMsg
+            end try
+            """
+        )
+
+        guard let output else {
+            return
+        }
+        if output.hasPrefix("error:") {
+            logger.log("media_control_volume_capture_error details=\"\(escapeLogValue(output))\"")
+            return
+        }
+
+        let pieces = output.split(separator: "|", maxSplits: 1).map(String.init)
+        guard pieces.count == 2,
+              let volume = Int(pieces[0]),
+              let muted = parseAppleScriptBool(pieces[1])
+        else {
+            logger.log("media_control_volume_capture_error details=\"invalid_state:\(escapeLogValue(output))\"")
+            return
+        }
+
+        preRecordingOutputVolume = volume
+        preRecordingOutputMuted = muted
+
+        let muteResult = scriptRunner(
+            """
+            try
+                set volume output volume 0
+                return "muted"
+            on error errMsg number errNum
+                return "error:" & errNum & ":" & errMsg
+            end try
+            """
+        )
+
+        if let muteResult, muteResult.hasPrefix("error:") {
+            logger.log("media_control_volume_mute_error details=\"\(escapeLogValue(muteResult))\"")
+            return
+        }
+
+        logger.log("media_control_volume_muted previous_volume=\(volume) previous_muted=\(muted)")
+    }
+
+    private func restoreSystemOutputVolumeIfNeeded() {
+        guard let volume = preRecordingOutputVolume,
+              let muted = preRecordingOutputMuted
+        else {
+            return
+        }
+        preRecordingOutputVolume = nil
+        preRecordingOutputMuted = nil
+
+        let mutedLiteral = muted ? "true" : "false"
+        let restoreResult = scriptRunner(
+            """
+            try
+                set volume output volume \(volume) output muted \(mutedLiteral)
+                return "restored"
+            on error errMsg number errNum
+                return "error:" & errNum & ":" & errMsg
+            end try
+            """
+        )
+
+        if let restoreResult, restoreResult.hasPrefix("error:") {
+            logger.log("media_control_volume_restore_error details=\"\(escapeLogValue(restoreResult))\"")
+            return
+        }
+
+        logger.log("media_control_volume_restored restored_volume=\(volume) restored_muted=\(muted)")
+    }
+
+    private func parseAppleScriptBool(_ value: String) -> Bool? {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "true":
+            return true
+        case "false":
+            return false
+        default:
+            return nil
+        }
     }
 
     private func pauseIfNeeded(browser: BrowserPlayer) -> Bool {

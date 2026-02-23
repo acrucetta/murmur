@@ -80,6 +80,37 @@ struct AppleScriptRecordingMediaControllerTests {
         #expect(resumeCalls == ["chrome"])
         #expect(resumeContainsYouTubeFallback == true)
     }
+
+    @Test
+    func mutesSystemVolumeDuringRecordingAndRestoresAfter() {
+        var sawMuteCommand = false
+        var sawRestoreCommand = false
+
+        let controller = AppleScriptRecordingMediaController(
+            logger: NoopLogger(),
+            dispatchAsync: { work in work() },
+            scriptRunner: { script in
+                if script.contains("output volume of (get volume settings)") {
+                    return "37|false"
+                }
+                if script.contains("set volume output volume 0") {
+                    sawMuteCommand = true
+                    return "muted"
+                }
+                if script.contains("set volume output volume 37 output muted false") {
+                    sawRestoreCommand = true
+                    return "restored"
+                }
+                return "noop"
+            }
+        )
+
+        controller.pauseMediaForRecording()
+        controller.resumeMediaAfterRecording()
+
+        #expect(sawMuteCommand == true)
+        #expect(sawRestoreCommand == true)
+    }
 }
 
 struct SwitchableRecordingMediaControllerTests {
