@@ -50,6 +50,7 @@ struct AppleScriptRecordingMediaControllerTests {
     func pausesAndResumesBrowserPlaybackWhenMediaElementIsActive() {
         var pauseCalls: [String] = []
         var resumeCalls: [String] = []
+        var resumeContainsYouTubeFallback = false
 
         let controller = AppleScriptRecordingMediaController(
             logger: NoopLogger(),
@@ -65,6 +66,7 @@ struct AppleScriptRecordingMediaControllerTests {
                    script.contains("media.play()")
                 {
                     resumeCalls.append("chrome")
+                    resumeContainsYouTubeFallback = script.contains("ytp-play-button")
                     return "resumed"
                 }
                 return "noop"
@@ -76,6 +78,7 @@ struct AppleScriptRecordingMediaControllerTests {
 
         #expect(pauseCalls == ["chrome"])
         #expect(resumeCalls == ["chrome"])
+        #expect(resumeContainsYouTubeFallback == true)
     }
 }
 
