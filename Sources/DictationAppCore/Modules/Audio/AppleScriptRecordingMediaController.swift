@@ -181,8 +181,10 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
 
     private func pauseScript(for browser: BrowserPlayer) -> String {
         switch browser {
-        case .chrome, .arc:
+        case .chrome:
             return pauseChromiumScript(applicationName: browser.rawValue)
+        case .arc:
+            return pauseChromiumActiveTabScript(applicationName: browser.rawValue)
         case .safari:
             return pauseSafariScript()
         }
@@ -190,8 +192,10 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
 
     private func resumeScript(for browser: BrowserPlayer) -> String {
         switch browser {
-        case .chrome, .arc:
+        case .chrome:
             return resumeChromiumScript(applicationName: browser.rawValue)
+        case .arc:
+            return resumeChromiumActiveTabScript(applicationName: browser.rawValue)
         case .safari:
             return resumeSafariScript()
         }
@@ -205,16 +209,34 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
                     set didPause to false
                     repeat with w in windows
                         repeat with t in tabs of w
-                            try
-                                set pauseResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();"
-                                if pauseResult is "paused" then
-                                    set didPause to true
-                                end if
-                            end try
+                            set pauseResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();"
+                            if pauseResult is "paused" then
+                                set didPause to true
+                            end if
                         end repeat
                     end repeat
                     if didPause then
                         return "paused"
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
+    }
+
+    private func pauseChromiumActiveTabScript(applicationName: String) -> String {
+        """
+        try
+            if application "\(applicationName)" is running then
+                tell application "\(applicationName)"
+                    if (count of windows) > 0 then
+                        set pauseResult to execute active tab of front window javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();"
+                        if pauseResult is "paused" then
+                            return "paused"
+                        end if
                     end if
                 end tell
             end if
@@ -233,16 +255,34 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
                     set didResume to false
                     repeat with w in windows
                         repeat with t in tabs of w
-                            try
-                                set resumeResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();"
-                                if resumeResult is "resumed" then
-                                    set didResume to true
-                                end if
-                            end try
+                            set resumeResult to execute t javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();"
+                            if resumeResult is "resumed" then
+                                set didResume to true
+                            end if
                         end repeat
                     end repeat
                     if didResume then
                         return "resumed"
+                    end if
+                end tell
+            end if
+        on error errMsg number errNum
+            return "error:" & errNum & ":" & errMsg
+        end try
+        return "noop"
+        """
+    }
+
+    private func resumeChromiumActiveTabScript(applicationName: String) -> String {
+        """
+        try
+            if application "\(applicationName)" is running then
+                tell application "\(applicationName)"
+                    if (count of windows) > 0 then
+                        set resumeResult to execute active tab of front window javascript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();"
+                        if resumeResult is "resumed" then
+                            return "resumed"
+                        end if
                     end if
                 end tell
             end if
@@ -261,12 +301,10 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
                     set didPause to false
                     repeat with w in windows
                         repeat with t in tabs of w
-                            try
-                                set pauseResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();" in t
-                                if pauseResult is "paused" then
-                                    set didPause to true
-                                end if
-                            end try
+                            set pauseResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didPause = false; for (const media of nodes) { if (!media.paused) { media.setAttribute('data-murmur-paused', '1'); media.pause(); didPause = true; } } return didPause ? 'paused' : 'noop'; })();" in t
+                            if pauseResult is "paused" then
+                                set didPause to true
+                            end if
                         end repeat
                     end repeat
                     if didPause then
@@ -289,12 +327,10 @@ public final class AppleScriptRecordingMediaController: RecordingMediaControllin
                     set didResume to false
                     repeat with w in windows
                         repeat with t in tabs of w
-                            try
-                                set resumeResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();" in t
-                                if resumeResult is "resumed" then
-                                    set didResume to true
-                                end if
-                            end try
+                            set resumeResult to do JavaScript "(() => { const nodes = Array.from(document.querySelectorAll('video,audio')); let didResume = false; for (const media of nodes) { if (media.getAttribute('data-murmur-paused') === '1') { media.removeAttribute('data-murmur-paused'); const playResult = media.play(); if (playResult && typeof playResult.catch === 'function') { playResult.catch(() => {}); } didResume = true; } } return didResume ? 'resumed' : 'noop'; })();" in t
+                            if resumeResult is "resumed" then
+                                set didResume to true
+                            end if
                         end repeat
                     end repeat
                     if didResume then
