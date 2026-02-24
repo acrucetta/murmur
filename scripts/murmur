@@ -9,27 +9,33 @@ TRANSCRIPT_DIR="${MURMUR_TRANSCRIPTS_DIR:-$HOME/Library/Application Support/Murm
 CONFIG_DIR="${MURMUR_CONFIG_DIR:-$HOME/Library/Application Support/Murmur}"
 SHORTCUT_FILE="$CONFIG_DIR/shortcut.txt"
 REWRITE_MODE_FILE="$CONFIG_DIR/rewrite_mode.txt"
+ASR_MODEL_FILE="$CONFIG_DIR/asr_model.txt"
 OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
 OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
 PAUSE_MEDIA_FILE="$CONFIG_DIR/pause_media_while_recording.txt"
 MICROPHONE_FILE="$CONFIG_DIR/microphone.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
 DEFAULT_REWRITE_MODE="literal"
+DEFAULT_ASR_MODEL="medium-streaming-en"
 DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
 DEFAULT_PAUSE_MEDIA_WHILE_RECORDING="false"
+ASR_SETUP_SCRIPT="$ROOT_DIR/scripts/asr_model_setup.py"
 COMMAND_NAME="${0##*/}"
 
 usage() {
   cat <<USAGE
 Usage:
   ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
-  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
-  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+  ${COMMAND_NAME} run [--asr-model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+  ${COMMAND_NAME} start [--asr-model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
   ${COMMAND_NAME} stop
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} microphones
+  ${COMMAND_NAME} asr list
+  ${COMMAND_NAME} asr use <model-id> [--skip-download]
+  ${COMMAND_NAME} asr current
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
+  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--openrouter-model <id>] [--asr-model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} uninstall
 
@@ -40,6 +46,7 @@ Commands:
   stop       stop background process
   logs       tail background log
   microphones list available input microphones
+  asr        manage asr model selection/download
   config     interactive TUI config wizard
   doctor     print effective runtime config and health
   uninstall  remove global CLI link
@@ -115,7 +122,11 @@ normalize_boolean() {
 }
 
 resolve_python() {
-  local env_python="${MURMUR_MOONSHINE_PYTHON:-}"
+  local env_python="${MURMUR_ASR_PYTHON:-}"
+  env_python="$(trim "$env_python")"
+  if [[ -z "$env_python" ]]; then
+    env_python="${MURMUR_MOONSHINE_PYTHON:-}"
+  fi
   env_python="$(trim "$env_python")"
   if [[ -n "$env_python" ]]; then
     printf '%s\n' "$env_python"
@@ -138,10 +149,19 @@ resolve_python() {
 }
 
 resolve_script() {
-  local env_script="${MURMUR_MOONSHINE_SCRIPT:-}"
+  local env_script="${MURMUR_ASR_SCRIPT:-}"
+  env_script="$(trim "$env_script")"
+  if [[ -z "$env_script" ]]; then
+    env_script="${MURMUR_MOONSHINE_SCRIPT:-}"
+  fi
   env_script="$(trim "$env_script")"
   if [[ -n "$env_script" ]]; then
     printf '%s\n' "$env_script"
+    return
+  fi
+
+  if [[ -f "$ROOT_DIR/scripts/hf_asr_transcribe.py" ]]; then
+    printf '%s\n' "$ROOT_DIR/scripts/hf_asr_transcribe.py"
     return
   fi
 
@@ -211,6 +231,261 @@ rewrite_mode_source() {
     return
   fi
   printf '%s\n' "default"
+}
+
+resolve_asr_model() {
+  local env_model="${MURMUR_ASR_MODEL:-}"
+  env_model="$(trim "$env_model")"
+  if [[ -n "$env_model" ]]; then
+    printf '%s\n' "$env_model"
+    return
+  fi
+
+  local file_model
+  file_model="$(read_file_value "$ASR_MODEL_FILE" || true)"
+  if [[ -n "$file_model" ]]; then
+    printf '%s\n' "$file_model"
+    return
+  fi
+
+  printf '%s\n' "$DEFAULT_ASR_MODEL"
+}
+
+asr_model_source() {
+  local env_model="${MURMUR_ASR_MODEL:-}"
+  env_model="$(trim "$env_model")"
+  if [[ -n "$env_model" ]]; then
+    printf '%s\n' "env:MURMUR_ASR_MODEL"
+    return
+  fi
+  if [[ -f "$ASR_MODEL_FILE" ]]; then
+    printf '%s\n' "file:$ASR_MODEL_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
+ASR_RUNTIME_KIND=""
+ASR_RUNTIME_MODEL=""
+ASR_RUNTIME_SCRIPT=""
+ASR_RUNTIME_PYTHON=""
+
+ensure_repo_venv_python() {
+  if [[ -x "$ROOT_DIR/.venv/bin/python3" ]]; then
+    printf '%s\n' "$ROOT_DIR/.venv/bin/python3"
+    return
+  fi
+
+  local setup_python="${MURMUR_SETUP_PYTHON:-python3}"
+  if ! command -v "$setup_python" >/dev/null 2>&1; then
+    echo "python executable not found: $setup_python" >&2
+    return 1
+  fi
+
+  echo "[asr] creating local python environment at $ROOT_DIR/.venv"
+  "$setup_python" -m venv "$ROOT_DIR/.venv"
+  printf '%s\n' "$ROOT_DIR/.venv/bin/python3"
+}
+
+resolve_asr_runtime_metadata() {
+  local requested_model="$1"
+  local python_bin="$2"
+
+  if [[ ! -x "$python_bin" ]]; then
+    python_bin="$(ensure_repo_venv_python)"
+  fi
+
+  if [[ ! -f "$ASR_SETUP_SCRIPT" ]]; then
+    echo "missing asr setup helper: $ASR_SETUP_SCRIPT" >&2
+    return 1
+  fi
+
+  local resolve_output
+  if ! resolve_output="$("$python_bin" "$ASR_SETUP_SCRIPT" resolve --model "$requested_model" --root-dir "$ROOT_DIR")"; then
+    echo "[asr] failed to resolve model '$requested_model'" >&2
+    return 1
+  fi
+
+  local resolved_runtime="" resolved_model="" resolved_script=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      runtime|provider) resolved_runtime="$value" ;;
+      runtime_model) resolved_model="$value" ;;
+      runtime_script) resolved_script="$value" ;;
+    esac
+  done <<< "$resolve_output"
+
+  if [[ -z "$resolved_runtime" || -z "$resolved_model" || -z "$resolved_script" ]]; then
+    echo "[asr] resolver returned incomplete metadata for '$requested_model'" >&2
+    return 1
+  fi
+
+  ASR_RUNTIME_KIND="$resolved_runtime"
+  ASR_RUNTIME_MODEL="$resolved_model"
+  ASR_RUNTIME_SCRIPT="$resolved_script"
+  ASR_RUNTIME_PYTHON="$python_bin"
+}
+
+ensure_asr_runtime_ready() {
+  local configured_model="$1"
+  local python_bin="$2"
+  local skip_download="${3:-0}"
+
+  if ! resolve_asr_runtime_metadata "$configured_model" "$python_bin"; then
+    return 1
+  fi
+  python_bin="$ASR_RUNTIME_PYTHON"
+
+  if [[ "${MURMUR_ASR_AUTO_SETUP:-true}" == "false" ]]; then
+    return 0
+  fi
+
+  local setup_args=(
+    "$ASR_SETUP_SCRIPT"
+    ensure
+    --model "$configured_model"
+    --root-dir "$ROOT_DIR"
+    --python "$python_bin"
+  )
+  if [[ "$skip_download" -eq 1 ]]; then
+    setup_args+=(--skip-download)
+  fi
+
+  echo "[asr] ensuring model=$configured_model"
+  local setup_output
+  if ! setup_output="$("$python_bin" "${setup_args[@]}")"; then
+    echo "[asr] setup failed for model '$configured_model'" >&2
+    return 1
+  fi
+
+  local resolved_runtime="" resolved_model="" resolved_script="" resolved_python=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      runtime|provider) resolved_runtime="$value" ;;
+      runtime_model) resolved_model="$value" ;;
+      runtime_script) resolved_script="$value" ;;
+      python) resolved_python="$value" ;;
+    esac
+  done <<< "$setup_output"
+
+  if [[ -z "$resolved_runtime" || -z "$resolved_model" || -z "$resolved_script" || -z "$resolved_python" ]]; then
+    echo "[asr] setup helper returned incomplete metadata" >&2
+    return 1
+  fi
+
+  ASR_RUNTIME_KIND="$resolved_runtime"
+  ASR_RUNTIME_MODEL="$resolved_model"
+  ASR_RUNTIME_SCRIPT="$resolved_script"
+  ASR_RUNTIME_PYTHON="$resolved_python"
+
+  # Persist normalized model id so subsequent runs are deterministic.
+  write_config_value "$ASR_MODEL_FILE" "$ASR_RUNTIME_MODEL"
+}
+
+asr_usage() {
+  cat <<USAGE
+usage: ${COMMAND_NAME} asr <list|use|current>
+
+examples:
+  ${COMMAND_NAME} asr list
+  ${COMMAND_NAME} asr use qwen3-asr-1.7b
+  ${COMMAND_NAME} asr use hf:openai/whisper-small
+  ${COMMAND_NAME} asr use moonshine:small-streaming-en
+  ${COMMAND_NAME} asr current
+USAGE
+}
+
+asr_list() {
+  local python_bin
+  python_bin="$(resolve_python)"
+  if [[ ! -x "$python_bin" ]]; then
+    python_bin="$(ensure_repo_venv_python)"
+  fi
+  "$python_bin" "$ASR_SETUP_SCRIPT" list
+}
+
+asr_current() {
+  local requested_model python_bin
+  requested_model="$(resolve_asr_model)"
+  python_bin="$(resolve_python)"
+  if ! resolve_asr_runtime_metadata "$requested_model" "$python_bin"; then
+    return 1
+  fi
+
+  echo "asr_runtime=$ASR_RUNTIME_KIND"
+  echo "asr_runtime_resolved=$ASR_RUNTIME_KIND"
+  echo "asr_model=$ASR_RUNTIME_MODEL"
+  echo "asr_model_source=$(asr_model_source)"
+  echo "asr_script=$ASR_RUNTIME_SCRIPT"
+  echo "python=$ASR_RUNTIME_PYTHON"
+}
+
+asr_use() {
+  local requested_model="${1:-}"
+  local skip_download=0
+  if [[ -z "$requested_model" ]]; then
+    echo "asr use requires a model id" >&2
+    asr_usage >&2
+    return 2
+  fi
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --skip-download)
+        skip_download=1
+        shift
+        ;;
+      *)
+        echo "unknown asr use option: $1" >&2
+        asr_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  local configured_model python_bin
+  python_bin="$(resolve_python)"
+  configured_model="$requested_model"
+  if ! ensure_asr_runtime_ready "$configured_model" "$python_bin" "$skip_download"; then
+    return 1
+  fi
+
+  write_config_value "$ASR_MODEL_FILE" "$ASR_RUNTIME_MODEL"
+
+  echo "asr selection updated:"
+  echo "  runtime=$ASR_RUNTIME_KIND"
+  echo "  model=$ASR_RUNTIME_MODEL"
+  echo "  script=$ASR_RUNTIME_SCRIPT"
+  echo "  python=$ASR_RUNTIME_PYTHON"
+  show_restart_note_if_running
+}
+
+asr_command() {
+  local action="${1:-}"
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "$action" in
+    list)
+      asr_list
+      ;;
+    use)
+      asr_use "$@"
+      ;;
+    current)
+      asr_current
+      ;;
+    -h|--h|--help|help|"")
+      asr_usage
+      ;;
+    *)
+      echo "unknown asr action: $action" >&2
+      asr_usage >&2
+      return 2
+      ;;
+  esac
 }
 
 resolve_pause_media_while_recording() {
@@ -431,7 +706,8 @@ examples:
     # opens interactive TUI with model picker + hotkey + pause-media + API key actions
   ${COMMAND_NAME} config set --shortcut ctrl+option+space
   ${COMMAND_NAME} config set --reset-shortcut
-  ${COMMAND_NAME} config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+  ${COMMAND_NAME} config set --mode smart --openrouter-model mistralai/mistral-small-3.1-24b-instruct
+  ${COMMAND_NAME} config set --asr-model qwen3-asr-1.7b
   ${COMMAND_NAME} config set --pause-media true
   ${COMMAND_NAME} config set --microphone "MacBook Pro Microphone"
   ${COMMAND_NAME} config set --reset-microphone
@@ -441,6 +717,7 @@ USAGE
 }
 
 config_get() {
+  asr_current
   echo "rewrite_mode=$(resolve_rewrite_mode)"
   echo "rewrite_mode_source=$(rewrite_mode_source)"
   echo "pause_media_while_recording=$(resolve_pause_media_while_recording)"
@@ -469,6 +746,7 @@ run_swift_config_wizard() {
     --config-dir "$CONFIG_DIR" \
     --default-shortcut "$DEFAULT_SHORTCUT" \
     --default-rewrite-mode "$DEFAULT_REWRITE_MODE" \
+    --default-asr-model "$DEFAULT_ASR_MODEL" \
     --default-openrouter-model "$DEFAULT_OPENROUTER_MODEL" \
     --default-pause-media-while-recording "$DEFAULT_PAUSE_MEDIA_WHILE_RECORDING"
 }
@@ -488,7 +766,7 @@ config_set_interactive() {
 }
 
 config_set_non_interactive() {
-  local mode="" model="" pause_media="" api_key="" shortcut="" microphone="" clear_api_key=0 reset_shortcut=0 reset_microphone=0
+  local mode="" openrouter_model="" asr_model="" pause_media="" api_key="" shortcut="" microphone="" clear_api_key=0 reset_shortcut=0 reset_microphone=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -500,12 +778,28 @@ config_set_non_interactive() {
         mode="$2"
         shift 2
         ;;
+      --openrouter-model)
+        if [[ $# -lt 2 ]]; then
+          echo "--openrouter-model requires a value" >&2
+          return 2
+        fi
+        openrouter_model="$2"
+        shift 2
+        ;;
       --model)
         if [[ $# -lt 2 ]]; then
           echo "--model requires a value" >&2
           return 2
         fi
-        model="$2"
+        openrouter_model="$2"
+        shift 2
+        ;;
+      --asr-model)
+        if [[ $# -lt 2 ]]; then
+          echo "--asr-model requires a value" >&2
+          return 2
+        fi
+        asr_model="$2"
         shift 2
         ;;
       --api-key)
@@ -574,7 +868,7 @@ config_set_non_interactive() {
     return 2
   fi
 
-  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && -z "$microphone" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 && "$reset_microphone" -eq 0 ]]; then
+  if [[ -z "$mode" && -z "$openrouter_model" && -z "$asr_model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && -z "$microphone" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 && "$reset_microphone" -eq 0 ]]; then
     config_set_interactive
     return $?
   fi
@@ -587,9 +881,14 @@ config_set_non_interactive() {
     write_config_value "$REWRITE_MODE_FILE" "$mode"
   fi
 
-  model="$(trim "$model")"
-  if [[ -n "$model" ]]; then
-    write_config_value "$OPENROUTER_MODEL_FILE" "$model"
+  openrouter_model="$(trim "$openrouter_model")"
+  if [[ -n "$openrouter_model" ]]; then
+    write_config_value "$OPENROUTER_MODEL_FILE" "$openrouter_model"
+  fi
+
+  asr_model="$(trim "$asr_model")"
+  if [[ -n "$asr_model" ]]; then
+    write_config_value "$ASR_MODEL_FILE" "$asr_model"
   fi
 
   if [[ -n "$pause_media" ]]; then
@@ -712,10 +1011,27 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local python_bin script_path asr_model shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local asr_skip_download=0 asr_skip_download_env normalized_skip
   local microphone_args=()
   python_bin="$(resolve_python)"
-  script_path="$(resolve_script)"
+  asr_model="$(resolve_asr_model)"
+  asr_skip_download_env="$(trim "${MURMUR_ASR_SKIP_DOWNLOAD:-}")"
+  if [[ -n "$asr_skip_download_env" ]]; then
+    if normalized_skip="$(normalize_boolean "$asr_skip_download_env" 2>/dev/null)"; then
+      if [[ "$normalized_skip" == "true" ]]; then
+        asr_skip_download=1
+      fi
+    else
+      echo "warning: invalid MURMUR_ASR_SKIP_DOWNLOAD '$asr_skip_download_env'; expected true|false" >&2
+    fi
+  fi
+  if ! ensure_asr_runtime_ready "$asr_model" "$python_bin" "$asr_skip_download"; then
+    return 1
+  fi
+  asr_model="$ASR_RUNTIME_MODEL"
+  python_bin="$ASR_RUNTIME_PYTHON"
+  script_path="$ASR_RUNTIME_SCRIPT"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
   pause_media_while_recording="$(resolve_pause_media_while_recording)"
@@ -731,8 +1047,9 @@ start_bg() {
     cd "$ROOT_DIR"
     if [[ -n "$openrouter_api_key" ]]; then
       MURMUR_OPENROUTER_API_KEY="$openrouter_api_key" nohup "$APP_BIN" \
-        --moonshine-python "$python_bin" \
-        --moonshine-script "$script_path" \
+        --asr-model "$asr_model" \
+        --asr-python "$python_bin" \
+        --asr-script "$script_path" \
         --shortcut "$shortcut_identifier" \
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
@@ -741,8 +1058,9 @@ start_bg() {
         "$@" >"$LOG_FILE" 2>&1 &
     else
       nohup "$APP_BIN" \
-        --moonshine-python "$python_bin" \
-        --moonshine-script "$script_path" \
+        --asr-model "$asr_model" \
+        --asr-python "$python_bin" \
+        --asr-script "$script_path" \
         --shortcut "$shortcut_identifier" \
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
@@ -764,10 +1082,27 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local python_bin script_path asr_model shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local asr_skip_download=0 asr_skip_download_env normalized_skip
   local microphone_args=()
   python_bin="$(resolve_python)"
-  script_path="$(resolve_script)"
+  asr_model="$(resolve_asr_model)"
+  asr_skip_download_env="$(trim "${MURMUR_ASR_SKIP_DOWNLOAD:-}")"
+  if [[ -n "$asr_skip_download_env" ]]; then
+    if normalized_skip="$(normalize_boolean "$asr_skip_download_env" 2>/dev/null)"; then
+      if [[ "$normalized_skip" == "true" ]]; then
+        asr_skip_download=1
+      fi
+    else
+      echo "warning: invalid MURMUR_ASR_SKIP_DOWNLOAD '$asr_skip_download_env'; expected true|false" >&2
+    fi
+  fi
+  if ! ensure_asr_runtime_ready "$asr_model" "$python_bin" "$asr_skip_download"; then
+    return 1
+  fi
+  asr_model="$ASR_RUNTIME_MODEL"
+  python_bin="$ASR_RUNTIME_PYTHON"
+  script_path="$ASR_RUNTIME_SCRIPT"
   shortcut_identifier="$(resolve_shortcut)"
   rewrite_mode="$(resolve_rewrite_mode)"
   pause_media_while_recording="$(resolve_pause_media_while_recording)"
@@ -782,8 +1117,9 @@ run_fg() {
   cd "$ROOT_DIR"
   if [[ -n "$openrouter_api_key" ]]; then
     exec env MURMUR_OPENROUTER_API_KEY="$openrouter_api_key" "$APP_BIN" \
-      --moonshine-python "$python_bin" \
-      --moonshine-script "$script_path" \
+      --asr-model "$asr_model" \
+      --asr-python "$python_bin" \
+      --asr-script "$script_path" \
       --shortcut "$shortcut_identifier" \
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
@@ -792,8 +1128,9 @@ run_fg() {
       "$@"
   else
     exec "$APP_BIN" \
-      --moonshine-python "$python_bin" \
-      --moonshine-script "$script_path" \
+      --asr-model "$asr_model" \
+      --asr-python "$python_bin" \
+      --asr-script "$script_path" \
       --shortcut "$shortcut_identifier" \
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
@@ -819,8 +1156,8 @@ stop_bg() {
 doctor() {
   echo "repo=$ROOT_DIR"
   echo "binary=$APP_BIN"
-  echo "python=$(resolve_python)"
-  echo "moonshine_script=$(resolve_script)"
+  asr_current
+  echo "asr_script_fallback=$(resolve_script)"
   echo "shortcut=$(resolve_shortcut)"
   echo "shortcut_source=$(shortcut_source)"
   echo "rewrite_mode=$(resolve_rewrite_mode)"
@@ -1052,6 +1389,9 @@ logs)
   ;;
 microphones)
   list_microphones
+  ;;
+asr)
+  asr_command "$@"
   ;;
 config)
   config_command "$@"

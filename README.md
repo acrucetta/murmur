@@ -1,6 +1,6 @@
 # Murmur
 
-Local-first macOS dictation with push-to-talk, local ASR (Moonshine), and reliable text insertion.
+Local-first macOS dictation with push-to-talk, local ASR (Moonshine by default), and reliable text insertion.
 
 ![Murmur AI art](docs/assets/jazz-murmur-ai.svg)
 
@@ -144,7 +144,8 @@ Manual CLI (reference/fallback):
 ```bash
 murmur config set --shortcut "ctrl+option+space"
 murmur config set --reset-shortcut
-murmur config set --mode smart --model mistralai/mistral-small-3.1-24b-instruct
+murmur config set --mode smart --openrouter-model mistralai/mistral-small-3.1-24b-instruct
+murmur config set --asr-model qwen3-asr-1.7b
 murmur config set --pause-media true
 murmur config set --microphone "MacBook Pro Microphone"
 murmur config set --reset-microphone
@@ -152,8 +153,12 @@ murmur config set --api-key "<token>"
 murmur config set --clear-api-key
 ```
 
+ASR model notes:
+- Model is the single user-facing selector. Runtime/provider is inferred automatically from the model id.
+- Useful env overrides: `MURMUR_ASR_MODEL`, `MURMUR_ASR_SCRIPT`, `MURMUR_ASR_PYTHON`.
+
 Config precedence:
-1. CLI flags (`--rewrite-mode`, `--openrouter-model`, etc.)
+1. CLI flags (`--asr-model`, `--rewrite-mode`, `--openrouter-model`, etc.)
 2. Environment variables (`MURMUR_*`, `OPENROUTER_API_KEY`)
 3. Config files in `~/Library/Application Support/Murmur`
 4. Built-in defaults (`literal` mode, default model id)
@@ -214,13 +219,13 @@ Clipboard fallback behavior:
 ## CLI Reference
 
 ```bash
-murmur run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
-murmur start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+murmur run [--asr-model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+murmur start [--asr-model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
 murmur stop
 murmur logs
 murmur microphones
 murmur config
-murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
+murmur config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--openrouter-model <id>] [--asr-model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
 murmur doctor
 murmur install [--python <python3>] [--skip-model-download] [--link-only]
 murmur uninstall

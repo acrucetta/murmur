@@ -19,4 +19,16 @@ struct CLIConfigOptionCatalogTests {
         #expect(choices.contains("Reset to default (ctrl+shift+space)"))
         #expect(choices.last == CLIConfigOptionCatalog.customEntryLabel)
     }
+
+    @Test
+    func asrModelChoicesIncludeCuratedValues() {
+        let choices = CLIConfigOptionCatalog.asrModelChoices(current: "qwen3-asr-1.7b")
+
+        #expect(choices.first == "qwen3-asr-1.7b")
+        #expect(choices.contains("moonshine"))
+        #expect(choices.contains("moonshine-small"))
+        #expect(choices.contains("qwen3-asr-0.6b"))
+        #expect(choices.contains("openai/whisper-small"))
+        #expect(choices.last == CLIConfigOptionCatalog.customEntryLabel)
+    }
 }

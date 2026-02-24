@@ -27,6 +27,21 @@ struct RuntimePathResolverTests {
     }
 
     @Test
+    func prefersASREnvironmentPythonOverride() {
+        let resolved = RuntimePathResolver.resolvePythonBinary(
+            explicit: nil,
+            currentDirectory: "/repo",
+            environment: [
+                "MURMUR_ASR_PYTHON": "/env/asr-python3",
+                "MURMUR_MOONSHINE_PYTHON": "/env/moonshine-python3"
+            ],
+            isExecutable: { _ in false }
+        )
+
+        #expect(resolved == "/env/asr-python3")
+    }
+
+    @Test
     func resolvesProjectVenvPythonWhenPresent() {
         let resolved = RuntimePathResolver.resolvePythonBinary(
             explicit: nil,
@@ -52,7 +67,7 @@ struct RuntimePathResolverTests {
 
     @Test
     func prefersLocalScriptPathWhenPresent() {
-        let resolved = RuntimePathResolver.resolveMoonshineScriptPath(
+        let resolved = RuntimePathResolver.resolveASRScriptPath(
             explicit: nil,
             currentDirectory: "/repo",
             environment: [:],
@@ -64,7 +79,7 @@ struct RuntimePathResolverTests {
 
     @Test
     func supportsScriptEnvironmentOverride() {
-        let resolved = RuntimePathResolver.resolveMoonshineScriptPath(
+        let resolved = RuntimePathResolver.resolveASRScriptPath(
             explicit: nil,
             currentDirectory: "/repo",
             environment: ["MURMUR_MOONSHINE_SCRIPT": "/env/script.py"],
@@ -72,5 +87,20 @@ struct RuntimePathResolverTests {
         )
 
         #expect(resolved == "/env/script.py")
+    }
+
+    @Test
+    func supportsASRScriptEnvironmentOverride() {
+        let resolved = RuntimePathResolver.resolveASRScriptPath(
+            explicit: nil,
+            currentDirectory: "/repo",
+            environment: [
+                "MURMUR_ASR_SCRIPT": "/env/asr_script.py",
+                "MURMUR_MOONSHINE_SCRIPT": "/env/moonshine_script.py"
+            ],
+            fileExists: { _ in false }
+        )
+
+        #expect(resolved == "/env/asr_script.py")
     }
 }

@@ -5,6 +5,14 @@ public protocol ASREngining {
     func stopAndFinalize() -> FinalTranscript?
 }
 
+public protocol ASREngineErrorReporting {
+    var lastEngineErrorDescription: String? { get }
+}
+
+public protocol ASRWAVTranscribing {
+    func transcribeWAVFile(at path: String) -> FinalTranscript?
+}
+
 public extension ASREngining {
     var providesFinalTranscriptOnStop: Bool { false }
 }

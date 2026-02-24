@@ -1,0 +1,43 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+    <style>
+      .title { font: 700 44px 'Avenir Next', Arial, sans-serif; fill: #0f766e; }
+      .axis { stroke: #0f766e; stroke-width: 2.5; }
+      .label { font: 600 22px 'Avenir Next', Arial, sans-serif; fill: #0f172a; }
+      .small { font: 500 18px 'Avenir Next', Arial, sans-serif; fill: #475569; }
+      .val { font: 700 22px 'Avenir Next', Arial, sans-serif; fill: #0f172a; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="900" fill="url(#bg4)"/>
+  <text x="70" y="95" class="title">Latency Snapshot (MacBook Pro, from Moonshine README)</text>
+
+  <line x1="220" y1="760" x2="1450" y2="760" class="axis"/>
+  <line x1="220" y1="180" x2="220" y2="760" class="axis"/>
+
+  <rect x="300" y="700" width="95" height="60" fill="#14b8a6"/>
+  <text x="290" y="685" class="label">Moonshine Tiny</text>
+  <text x="305" y="790" class="val">34ms</text>
+
+  <rect x="530" y="630" width="95" height="130" fill="#14b8a6"/>
+  <text x="510" y="615" class="label">Moonshine Small</text>
+  <text x="533" y="790" class="val">73ms</text>
+
+  <rect x="760" y="570" width="95" height="190" fill="#14b8a6"/>
+  <text x="735" y="555" class="label">Moonshine Medium</text>
+  <text x="762" y="790" class="val">107ms</text>
+
+  <rect x="990" y="610" width="95" height="150" fill="#60a5fa"/>
+  <text x="995" y="595" class="label">Whisper Tiny</text>
+  <text x="995" y="790" class="val">277ms</text>
+
+  <rect x="1220" y="350" width="95" height="410" fill="#60a5fa"/>
+  <text x="1210" y="335" class="label">Whisper Small</text>
+  <text x="1215" y="790" class="val">1940ms</text>
+
+  <text x="70" y="840" class="small">Visualized from Moonshine public benchmark table. Lower bars are faster.</text>
+</svg>

@@ -1,0 +1,4 @@
+%%{init: {'theme': 'neutral', 'themeVariables': { 'fontSize': '24px'}}}%%
+flowchart LR
+    A["Waiting<br/>Idle"] --> B["Recording<br/>Listening"] --> C["Finalizing<br/>Speech to text"] --> D["Inserting<br/>Write into focused app"] --> E["Error<br/>if something fails"]
+    E -. recover to idle .-> A

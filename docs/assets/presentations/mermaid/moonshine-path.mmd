@@ -1,0 +1,3 @@
+%%{init: {'theme': 'neutral', 'themeVariables': { 'fontSize': '24px'}}}%%
+flowchart LR
+    A["Hold hotkey<br/>start capture"] --> B["Capture audio<br/>microphone frames"] --> C["Release hotkey<br/>finalize session"] --> D["Moonshine transcription<br/>local script + local model"] --> E["Clean text -> Optional rewrite -> Insert"]

@@ -53,20 +53,27 @@ nohup ./.build/debug/DictationPreviewCLI --hotkey-daemon > /tmp/murmur-daemon.lo
 ```
 
 Optional flags:
-- `--moonshine-python /path/to/python3`
-- `--moonshine-script /path/to/scripts/moonshine_transcribe.py`
-- `--model medium-streaming-en` (default)
-- `MURMUR_MOONSHINE_PYTHON=/path/to/python3` (env override for all run modes)
-- `MURMUR_MOONSHINE_SCRIPT=/path/to/script.py` (env override for all run modes)
+- `--asr-model medium-streaming-en` (default)
+- `--asr-python /path/to/python3`
+- `--asr-script /path/to/scripts/moonshine_transcribe.py`
+- `--moonshine-python /path/to/python3` (legacy alias for `--asr-python`)
+- `--moonshine-script /path/to/scripts/moonshine_transcribe.py` (legacy alias for `--asr-script`)
+- `--model medium-streaming-en` (legacy alias for `--asr-model`)
+- `MURMUR_ASR_MODEL=<id>` (env override)
+- `MURMUR_ASR_PYTHON=/path/to/python3` (env override)
+- `MURMUR_ASR_SCRIPT=/path/to/script.py` (env override)
+- `MURMUR_MOONSHINE_PYTHON=/path/to/python3` (legacy env alias)
+- `MURMUR_MOONSHINE_SCRIPT=/path/to/script.py` (legacy env alias)
 
 Default resolver order for python:
-1. `--moonshine-python`
-2. `MURMUR_MOONSHINE_PYTHON`
-3. `$VIRTUAL_ENV/bin/python3`
-4. `./.venv/bin/python3`
-5. `python3`
+1. `--asr-python`
+2. `MURMUR_ASR_PYTHON`
+3. `MURMUR_MOONSHINE_PYTHON`
+4. `$VIRTUAL_ENV/bin/python3`
+5. `./.venv/bin/python3`
+6. `python3`
 
-Advanced script flags (passed via `--moonshine-script` custom wrapper):
+Advanced script flags (passed via `--asr-script` custom wrapper):
 - `--backend auto|voice|onnx` (default `auto`)
 - `--offline` (default; local-only runtime, no model downloads)
 - `--allow-network` (opt-in override to permit runtime model fetch)
@@ -145,7 +152,7 @@ murmur doctor
 
 Shortcut config:
 ```bash
-murmur config                 # guided wizard (shortcut + rewrite + model + API key)
+murmur config                 # guided wizard (shortcut + rewrite mode/model + API key)
 murmur shortcut get
 murmur shortcut set
 murmur shortcut set "ctrl+option+space"

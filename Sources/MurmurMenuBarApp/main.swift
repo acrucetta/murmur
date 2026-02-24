@@ -12,6 +12,16 @@ private func escapeLogValue(_ value: String) -> String {
         .replacingOccurrences(of: "\r", with: "\\r")
 }
 
+private func inferASRRuntimeLabel(command: [String], model: String) -> String {
+    let mentionsMoonshine = (command + [model]).contains { value in
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .contains("moonshine")
+    }
+    return mentionsMoonshine ? "moonshine" : "generic"
+}
+
 @main
 struct MurmurMenuBarApp {
     static func main() {
@@ -37,7 +47,7 @@ struct MurmurMenuBarApp {
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
-            model: arguments.model,
+            asrModel: arguments.asrModel,
             pythonBinary: arguments.pythonBinary,
             scriptPath: arguments.scriptPath,
             configDirectory: arguments.configDirectory,
@@ -69,7 +79,7 @@ struct MurmurMenuBarApp {
 }
 
 private struct Arguments {
-    let model: String
+    let asrModel: String
     let pythonBinary: String
     let scriptPath: String
     let configDirectory: String
@@ -114,14 +124,18 @@ private struct Arguments {
         )
 
         return Arguments(
-            model: value(after: "--model", in: rawArgs) ?? "medium-streaming-en",
+            asrModel: resolveASRModel(
+                explicit: value(after: "--asr-model", in: rawArgs),
+                legacyModelFlag: value(after: "--model", in: rawArgs),
+                environment: environment
+            ),
             pythonBinary: RuntimePathResolver.resolvePythonBinary(
-                explicit: value(after: "--moonshine-python", in: rawArgs),
+                explicit: value(after: "--asr-python", in: rawArgs) ?? value(after: "--moonshine-python", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             ),
-            scriptPath: RuntimePathResolver.resolveMoonshineScriptPath(
-                explicit: value(after: "--moonshine-script", in: rawArgs),
+            scriptPath: RuntimePathResolver.resolveASRScriptPath(
+                explicit: value(after: "--asr-script", in: rawArgs) ?? value(after: "--moonshine-script", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             ),
@@ -144,7 +158,7 @@ private struct Arguments {
     }
 
     private static func value(after flag: String, in args: [String]) -> String? {
-        guard let index = args.firstIndex(of: flag) else {
+        guard let index = args.lastIndex(of: flag) else {
             return nil
         }
         let next = args.index(after: index)
@@ -186,6 +200,23 @@ private struct Arguments {
         }
 
         return (previewState, nil)
+    }
+
+    private static func resolveASRModel(
+        explicit: String?,
+        legacyModelFlag: String?,
+        environment: [String: String]
+    ) -> String {
+        if let explicit, !explicit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return explicit
+        }
+        if let legacyModelFlag, !legacyModelFlag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return legacyModelFlag
+        }
+        if let envValue = environment["MURMUR_ASR_MODEL"], !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return envValue
+        }
+        return "medium-streaming-en"
     }
 
     private static func resolveRewriteMode(
@@ -456,7 +487,7 @@ private final class MenuBarRuntime {
     private let statusUI: MenuBarStatusUI
     private let logger: MenuBarLogger
     private let audioCapture: AudioCapture
-    private let asrEngine: MoonshineProcessASREngine
+    private let asrEngine: ASREngining
     private let orchestrator: SessionOrchestrator
     private let hotkeyController: HotkeyController
     private let bridge: HotkeySessionBridge
@@ -468,7 +499,7 @@ private final class MenuBarRuntime {
 
     init(
         menuBarController: MenuBarController,
-        model: String,
+        asrModel: String,
         pythonBinary: String,
         scriptPath: String,
         configDirectory: String,
@@ -494,10 +525,12 @@ private final class MenuBarRuntime {
         let configStore = MurmurConfigStore(configDirectory: configDirectory)
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
         let transcriptHistory = FileTranscriptHistoryStore()
-        let asrEngine = MoonshineProcessASREngine(
+        let asrEngine = ASREngineFactory.makeProcessEngine(
             command: [pythonBinary, scriptPath],
-            model: model
+            model: asrModel
         )
+        let runtimeLabel = inferASRRuntimeLabel(command: [pythonBinary, scriptPath], model: asrModel)
+        logger.log("asr_runtime=\(runtimeLabel) asr_model=\"\(escapeLogValue(asrModel))\"")
         let contextProvider = AppRewriteContextProvider(mode: rewriteMode)
         let transcriptRewriter: TranscriptRewriting
         if rewriteMode == .smart,
@@ -605,7 +638,7 @@ private final class MenuBarRuntime {
             guard error == .engineError else {
                 return
             }
-            if let engineError = asrEngine.lastError {
+            if let engineError = (asrEngine as? ASREngineErrorReporting)?.lastEngineErrorDescription {
                 Task { @MainActor in
                     menuBarController.setLastErrorMessage("engine: \(engineError)")
                 }

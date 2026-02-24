@@ -1,6 +1,6 @@
 import Foundation
 
-public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporting, ASRWAVTranscribing {
+public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting, ASRWAVTranscribing {
     public typealias CommandRunner = (_ executable: String, _ arguments: [String]) throws -> String
 
     public enum EngineError: Error, Equatable {
@@ -14,7 +14,6 @@ public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporti
 
     private let command: [String]
     private let model: String
-    private let offline: Bool
     private let runCommand: CommandRunner
     private let fileManager: FileManager
     private var bufferedSamples: [Float] = []
@@ -30,27 +29,23 @@ public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporti
 
     public init(
         command: [String],
-        model: String = "moonshine/tiny",
-        offline: Bool = true,
+        model: String = "default",
         fileManager: FileManager = .default
     ) {
         self.command = command
         self.model = model
-        self.offline = offline
-        self.runCommand = MoonshineProcessASREngine.defaultRunCommand
+        self.runCommand = GenericProcessASREngine.defaultRunCommand
         self.fileManager = fileManager
     }
 
     public init(
         command: [String],
-        model: String = "moonshine/tiny",
-        offline: Bool = true,
+        model: String = "default",
         runCommand: @escaping CommandRunner,
         fileManager: FileManager = .default
     ) {
         self.command = command
         self.model = model
-        self.offline = offline
         self.runCommand = runCommand
         self.fileManager = fileManager
     }
@@ -84,10 +79,7 @@ public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporti
             defer { try? fileManager.removeItem(at: wavURL) }
 
             let executable = command[0]
-            var arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
-            if offline {
-                arguments.append("--offline")
-            }
+            let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
             let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !output.isEmpty else {
@@ -113,10 +105,7 @@ public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporti
 
         do {
             let executable = command[0]
-            var arguments = Array(command.dropFirst()) + [path, "--model", model]
-            if offline {
-                arguments.append("--offline")
-            }
+            let arguments = Array(command.dropFirst()) + [path, "--model", model]
             let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !output.isEmpty else {
                 lastError = .emptyTranscription
@@ -133,7 +122,7 @@ public final class MoonshineProcessASREngine: ASREngining, ASREngineErrorReporti
     }
 
     private func writeTemporaryWAV(samples: [Float], sampleRate: Int, channels: Int) throws -> URL {
-        let fileURL = fileManager.temporaryDirectory.appendingPathComponent("moonshine-\(UUID().uuidString).wav")
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent("asr-\(UUID().uuidString).wav")
         let data = try Self.makeWAVData(samples: samples, sampleRate: sampleRate, channels: channels)
         try data.write(to: fileURL)
         return fileURL

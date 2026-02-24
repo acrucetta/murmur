@@ -19,9 +19,19 @@ struct DictationPreviewCLI {
         case .simulate(let transcript):
             runSimulatedPreview(transcript: transcript)
         case .moonshineWAV(let wavPath, let model, let pythonBinary, let scriptPath):
-            runMoonshinePreview(wavPath: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath)
+            runMoonshinePreview(
+                wavPath: wavPath,
+                model: model,
+                pythonBinary: pythonBinary,
+                scriptPath: scriptPath
+            )
         case .moonshineLive(let model, let pythonBinary, let scriptPath, let microphone):
-            runMoonshineLivePreview(model: model, pythonBinary: pythonBinary, scriptPath: scriptPath, microphone: microphone)
+            runMoonshineLivePreview(
+                model: model,
+                pythonBinary: pythonBinary,
+                scriptPath: scriptPath,
+                microphone: microphone
+            )
         case .hotkeyDaemon(let model, let pythonBinary, let scriptPath, let shortcutIdentifier, let microphone):
             runHotkeyDaemon(
                 model: model,
@@ -38,6 +48,7 @@ struct DictationPreviewCLI {
             let configDir,
             let defaultShortcut,
             let defaultRewriteMode,
+            let defaultASRModel,
             let defaultOpenRouterModel,
             let defaultPauseMediaWhileRecording
         ):
@@ -45,6 +56,7 @@ struct DictationPreviewCLI {
                 configDir: configDir,
                 defaultShortcut: defaultShortcut,
                 defaultRewriteMode: defaultRewriteMode,
+                defaultASRModel: defaultASRModel,
                 defaultOpenRouterModel: defaultOpenRouterModel,
                 defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
             )
@@ -94,22 +106,31 @@ struct DictationPreviewCLI {
         }
     }
 
-    private static func runMoonshinePreview(wavPath: String, model: String, pythonBinary: String, scriptPath: String) {
-        let engine = MoonshineProcessASREngine(
+    private static func runMoonshinePreview(
+        wavPath: String,
+        model: String,
+        pythonBinary: String,
+        scriptPath: String
+    ) {
+        let engine = ASREngineFactory.makeProcessEngine(
             command: [pythonBinary, scriptPath],
             model: model
         )
 
         emit("Moonshine preview start")
-        if let final = engine.transcribeWAVFile(at: wavPath) {
+        if let final = transcribeWAV(engine: engine, path: wavPath) {
             emit("transcript=\(final.text)")
         } else {
             emit("error=moonshine_transcription_failed")
-            if let lastError = engine.lastError {
-                emit("details=\(lastError)")
+            if let details = (engine as? ASREngineErrorReporting)?.lastEngineErrorDescription {
+                emit("details=\(details)")
             }
         }
         emit("Moonshine preview end")
+    }
+
+    private static func transcribeWAV(engine: ASREngining, path: String) -> FinalTranscript? {
+        (engine as? ASRWAVTranscribing)?.transcribeWAVFile(at: path)
     }
 
     private static func runListMicrophones() {
@@ -143,7 +164,7 @@ struct DictationPreviewCLI {
         let meter = LiveCaptureMeter()
         let audioCapture = AudioCapture(preferredInputDevice: microphone)
         let transcriptHistory = FileTranscriptHistoryStore()
-        let asrEngine = MoonshineProcessASREngine(
+        let asrEngine = ASREngineFactory.makeProcessEngine(
             command: [pythonBinary, scriptPath],
             model: model
         )
@@ -191,8 +212,8 @@ struct DictationPreviewCLI {
             }
         } else {
             emit("error=live_transcription_failed")
-            if let lastError = asrEngine.lastError {
-                emit("details=\(lastError)")
+            if let details = (asrEngine as? ASREngineErrorReporting)?.lastEngineErrorDescription {
+                emit("details=\(details)")
             } else if let result = writer.lastResult {
                 emit("details=insertion_failed method=\(result.method.rawValue) code=\(result.error?.rawValue ?? "unknown")")
             }
@@ -229,7 +250,7 @@ struct DictationPreviewCLI {
 
         let audioCapture = AudioCapture(preferredInputDevice: microphone)
         let transcriptHistory = FileTranscriptHistoryStore()
-        let asrEngine = MoonshineProcessASREngine(
+        let asrEngine = ASREngineFactory.makeProcessEngine(
             command: [pythonBinary, scriptPath],
             model: model
         )
@@ -248,9 +269,9 @@ struct DictationPreviewCLI {
                 return
             }
 
-            if let details = asrEngine.lastError {
+            if let details = (asrEngine as? ASREngineErrorReporting)?.lastEngineErrorDescription {
                 emit("details=\(details)")
-                if case .missingAudio = details {
+                if details == "missingAudio" {
                     emit("hint=speak_while_holding_shortcut_and_verify_active_input_device")
                 }
             }
@@ -342,6 +363,7 @@ struct DictationPreviewCLI {
         configDir: String,
         defaultShortcut: String,
         defaultRewriteMode: String,
+        defaultASRModel: String,
         defaultOpenRouterModel: String,
         defaultPauseMediaWhileRecording: Bool
     ) {
@@ -349,6 +371,7 @@ struct DictationPreviewCLI {
             configDir: configDir,
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
+            defaultASRModel: defaultASRModel,
             defaultOpenRouterModel: defaultOpenRouterModel,
             defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
         )
@@ -377,13 +400,20 @@ private struct Arguments {
         case simulate(String)
         case moonshineWAV(path: String, model: String, pythonBinary: String, scriptPath: String)
         case moonshineLive(model: String, pythonBinary: String, scriptPath: String, microphone: String?)
-        case hotkeyDaemon(model: String, pythonBinary: String, scriptPath: String, shortcutIdentifier: String?, microphone: String?)
+        case hotkeyDaemon(
+            model: String,
+            pythonBinary: String,
+            scriptPath: String,
+            shortcutIdentifier: String?,
+            microphone: String?
+        )
         case listMicrophones
         case captureShortcut
         case configWizard(
             configDir: String,
             defaultShortcut: String,
             defaultRewriteMode: String,
+            defaultASRModel: String,
             defaultOpenRouterModel: String,
             defaultPauseMediaWhileRecording: Bool
         )
@@ -393,12 +423,12 @@ private struct Arguments {
     static let usage = """
     Usage:
       swift run DictationPreviewCLI --simulate "hello world"
-      swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py]
-      swift run DictationPreviewCLI --moonshine-live [--model medium-streaming-en] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
-      swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
+      swift run DictationPreviewCLI --moonshine-wav /path/audio.wav [--asr-model medium-streaming-en] [--asr-python python3] [--asr-script scripts/moonshine_transcribe.py]
+      swift run DictationPreviewCLI --moonshine-live [--asr-model medium-streaming-en] [--asr-python python3] [--asr-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
+      swift run DictationPreviewCLI --hotkey-daemon [--asr-model medium-streaming-en] [--shortcut ctrl+shift+space] [--asr-python python3] [--asr-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
       swift run DictationPreviewCLI --list-microphones
       swift run DictationPreviewCLI --capture-shortcut
-      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false]
+      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-asr-model medium-streaming-en] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false]
     """
 
     let mode: Mode
@@ -415,29 +445,36 @@ private struct Arguments {
         }
 
         if let wavPath = value(after: "--moonshine-wav", in: rawArgs) {
-            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
+            let model = resolveASRModel(rawArgs: rawArgs, environment: environment)
             let pythonBinary = RuntimePathResolver.resolvePythonBinary(
-                explicit: value(after: "--moonshine-python", in: rawArgs),
+                explicit: value(after: "--asr-python", in: rawArgs) ?? value(after: "--moonshine-python", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
-                explicit: value(after: "--moonshine-script", in: rawArgs),
+            let scriptPath = RuntimePathResolver.resolveASRScriptPath(
+                explicit: value(after: "--asr-script", in: rawArgs) ?? value(after: "--moonshine-script", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            return Arguments(mode: .moonshineWAV(path: wavPath, model: model, pythonBinary: pythonBinary, scriptPath: scriptPath))
+            return Arguments(
+                mode: .moonshineWAV(
+                    path: wavPath,
+                    model: model,
+                    pythonBinary: pythonBinary,
+                    scriptPath: scriptPath
+                )
+            )
         }
 
         if rawArgs.contains("--moonshine-live") {
-            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
+            let model = resolveASRModel(rawArgs: rawArgs, environment: environment)
             let pythonBinary = RuntimePathResolver.resolvePythonBinary(
-                explicit: value(after: "--moonshine-python", in: rawArgs),
+                explicit: value(after: "--asr-python", in: rawArgs) ?? value(after: "--moonshine-python", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
-                explicit: value(after: "--moonshine-script", in: rawArgs),
+            let scriptPath = RuntimePathResolver.resolveASRScriptPath(
+                explicit: value(after: "--asr-script", in: rawArgs) ?? value(after: "--moonshine-script", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
@@ -452,14 +489,14 @@ private struct Arguments {
         }
 
         if rawArgs.contains("--hotkey-daemon") {
-            let model = value(after: "--model", in: rawArgs) ?? "medium-streaming-en"
+            let model = resolveASRModel(rawArgs: rawArgs, environment: environment)
             let pythonBinary = RuntimePathResolver.resolvePythonBinary(
-                explicit: value(after: "--moonshine-python", in: rawArgs),
+                explicit: value(after: "--asr-python", in: rawArgs) ?? value(after: "--moonshine-python", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
-            let scriptPath = RuntimePathResolver.resolveMoonshineScriptPath(
-                explicit: value(after: "--moonshine-script", in: rawArgs),
+            let scriptPath = RuntimePathResolver.resolveASRScriptPath(
+                explicit: value(after: "--asr-script", in: rawArgs) ?? value(after: "--moonshine-script", in: rawArgs),
                 currentDirectory: currentDirectory,
                 environment: environment
             )
@@ -489,6 +526,7 @@ private struct Arguments {
             }
             let defaultShortcut = value(after: "--default-shortcut", in: rawArgs) ?? "ctrl+shift+space"
             let defaultRewriteMode = value(after: "--default-rewrite-mode", in: rawArgs) ?? "literal"
+            let defaultASRModel = value(after: "--default-asr-model", in: rawArgs) ?? "medium-streaming-en"
             let defaultOpenRouterModel = value(after: "--default-openrouter-model", in: rawArgs) ?? "mistralai/mistral-small-3.1-24b-instruct"
             let defaultPauseMediaRaw = value(after: "--default-pause-media-while-recording", in: rawArgs) ?? "false"
             let defaultPauseMedia = parseBool(defaultPauseMediaRaw) ?? false
@@ -497,6 +535,7 @@ private struct Arguments {
                     configDir: configDir,
                     defaultShortcut: defaultShortcut,
                     defaultRewriteMode: defaultRewriteMode,
+                    defaultASRModel: defaultASRModel,
                     defaultOpenRouterModel: defaultOpenRouterModel,
                     defaultPauseMediaWhileRecording: defaultPauseMedia
                 )
@@ -507,7 +546,7 @@ private struct Arguments {
     }
 
     private static func value(after flag: String, in args: [String]) -> String? {
-        guard let index = args.firstIndex(of: flag) else {
+        guard let index = args.lastIndex(of: flag) else {
             return nil
         }
 
@@ -529,6 +568,21 @@ private struct Arguments {
         default:
             return nil
         }
+    }
+
+    private static func resolveASRModel(rawArgs: [String], environment: [String: String]) -> String {
+        if let explicit = value(after: "--asr-model", in: rawArgs) {
+            return explicit
+        }
+        if let legacy = value(after: "--model", in: rawArgs) {
+            return legacy
+        }
+        if let envValue = environment["MURMUR_ASR_MODEL"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !envValue.isEmpty
+        {
+            return envValue
+        }
+        return "medium-streaming-en"
     }
 }
 

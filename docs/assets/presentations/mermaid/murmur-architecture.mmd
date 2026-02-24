@@ -1,0 +1,6 @@
+%%{init: {'theme': 'neutral', 'themeVariables': { 'fontSize': '24px'}}}%%
+flowchart LR
+    H["Hotkey Listener<br/>press / hold / release"] --> S["Session Coordinator<br/>workflow + state transitions"]
+    S --> P["Permission Checks"]
+    S --> M["Microphone Capture"]
+    M --> V["Moonshine Voice"] --> C["Text Cleanup"] --> R["Optional Rewrite"] --> I["Text Insertion"] --> L["Status + History + Logs"]

@@ -11,6 +11,10 @@ public enum RuntimePathResolver {
             return trimmed
         }
 
+        if let environmentOverride = trimmedValue(environment["MURMUR_ASR_PYTHON"]) {
+            return environmentOverride
+        }
+
         if let environmentOverride = trimmedValue(environment["MURMUR_MOONSHINE_PYTHON"]) {
             return environmentOverride
         }
@@ -30,7 +34,7 @@ public enum RuntimePathResolver {
         return "python3"
     }
 
-    public static func resolveMoonshineScriptPath(
+    public static func resolveASRScriptPath(
         explicit: String?,
         currentDirectory: String,
         environment: [String: String],
@@ -38,6 +42,10 @@ public enum RuntimePathResolver {
     ) -> String {
         if let explicit, let trimmed = trimmedValue(explicit) {
             return trimmed
+        }
+
+        if let environmentOverride = trimmedValue(environment["MURMUR_ASR_SCRIPT"]) {
+            return environmentOverride
         }
 
         if let environmentOverride = trimmedValue(environment["MURMUR_MOONSHINE_SCRIPT"]) {

@@ -28,6 +28,7 @@ private enum TermKitMicrophoneSelection {
 private struct TermKitConfigState {
     let currentShortcut: String
     let currentRewriteMode: String
+    let currentASRModel: String
     let currentModel: String
     let currentPauseMediaWhileRecording: Bool
     let currentMicrophone: String?
@@ -39,11 +40,13 @@ private struct TermKitConfigStore {
     let configDir: String
     let defaultShortcut: String
     let defaultRewriteMode: String
+    let defaultASRModel: String
     let defaultOpenRouterModel: String
     let defaultPauseMediaWhileRecording: Bool
 
     private var shortcutPath: String { "\(configDir)/shortcut.txt" }
     private var rewriteModePath: String { "\(configDir)/rewrite_mode.txt" }
+    private var asrModelPath: String { "\(configDir)/asr_model.txt" }
     private var modelPath: String { "\(configDir)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDir)/pause_media_while_recording.txt" }
     private var microphonePath: String { "\(configDir)/microphone.txt" }
@@ -54,6 +57,7 @@ private struct TermKitConfigStore {
         let rewriteMode = normalizeRewriteMode(readValue(path: rewriteModePath))
             ?? normalizeRewriteMode(defaultRewriteMode)
             ?? "smart"
+        let asrModel = readValue(path: asrModelPath) ?? defaultASRModel
         let model = readValue(path: modelPath) ?? defaultOpenRouterModel
         let pauseMediaWhileRecording = normalizeBoolean(readValue(path: pauseMediaPath)) ?? defaultPauseMediaWhileRecording
         let microphone = readValue(path: microphonePath)
@@ -63,6 +67,7 @@ private struct TermKitConfigStore {
         return .init(
             currentShortcut: shortcut,
             currentRewriteMode: rewriteMode,
+            currentASRModel: asrModel,
             currentModel: model,
             currentPauseMediaWhileRecording: pauseMediaWhileRecording,
             currentMicrophone: microphone,
@@ -74,6 +79,7 @@ private struct TermKitConfigStore {
     func persist(
         shortcut: TermKitShortcutSelection,
         rewriteMode: String,
+        asrModel: String,
         openRouterModel: String?,
         pauseMediaWhileRecording: Bool,
         microphone: TermKitMicrophoneSelection,
@@ -81,6 +87,7 @@ private struct TermKitConfigStore {
     ) throws {
         try ensureConfigDir()
         try writeValue(path: rewriteModePath, value: rewriteMode)
+        try writeValue(path: asrModelPath, value: asrModel)
         try writeValue(path: pauseMediaPath, value: pauseMediaWhileRecording ? "true" : "false")
 
         if let openRouterModel {
@@ -166,6 +173,7 @@ private struct TermKitConfigStore {
             return nil
         }
     }
+
 }
 
 private enum TermKitWizardError: Error {
@@ -218,10 +226,12 @@ private final class TermKitConfigWizardApp {
     private var shortcutSelection: TermKitShortcutSelection = .keep
     private var microphoneSelection: TermKitMicrophoneSelection = .keep
     private var rewriteMode: String
+    private var selectedASRModel: String
     private var selectedModel: String
     private var pauseMediaWhileRecording: Bool
 
     private let rewriteModeValueLabel = Label("")
+    private let asrModelValueLabel = Label("")
     private let modelValueLabel = Label("")
     private let hotkeyValueLabel = Label("")
     private let microphoneValueLabel = Label("")
@@ -240,6 +250,7 @@ private final class TermKitConfigWizardApp {
         self.store = store
         self.initialState = store.load()
         self.rewriteMode = initialState.currentRewriteMode
+        self.selectedASRModel = initialState.currentASRModel
         self.selectedModel = initialState.currentModel
         self.pauseMediaWhileRecording = initialState.currentPauseMediaWhileRecording
     }
@@ -294,7 +305,7 @@ private final class TermKitConfigWizardApp {
 
         let modelTitle = Label("OpenRouter model:")
         modelTitle.x = Pos.at(2)
-        modelTitle.y = Pos.at(13)
+        modelTitle.y = Pos.at(15)
 
         modelValueLabel.x = Pos.at(24)
         modelValueLabel.y = Pos.top(of: modelTitle)
@@ -308,9 +319,25 @@ private final class TermKitConfigWizardApp {
             self.chooseModel()
         }
 
+        let asrModelTitle = Label("ASR model:")
+        asrModelTitle.x = Pos.at(2)
+        asrModelTitle.y = Pos.at(13)
+
+        asrModelValueLabel.x = Pos.at(24)
+        asrModelValueLabel.y = Pos.top(of: asrModelTitle)
+        asrModelValueLabel.width = Dim.sized(42)
+
+        let asrModelButton = Button("_Choose")
+        asrModelButton.colorScheme = theme.actionButton
+        asrModelButton.x = Pos.right(of: asrModelValueLabel) + 1
+        asrModelButton.y = Pos.top(of: asrModelTitle)
+        asrModelButton.clicked = { _ in
+            self.chooseASRModel()
+        }
+
         let hotkeyTitle = Label("Primary hotkey:")
         hotkeyTitle.x = Pos.at(2)
-        hotkeyTitle.y = Pos.at(15)
+        hotkeyTitle.y = Pos.at(17)
 
         hotkeyValueLabel.x = Pos.at(24)
         hotkeyValueLabel.y = Pos.top(of: hotkeyTitle)
@@ -326,7 +353,7 @@ private final class TermKitConfigWizardApp {
 
         let microphoneTitle = Label("Microphone input:")
         microphoneTitle.x = Pos.at(2)
-        microphoneTitle.y = Pos.at(17)
+        microphoneTitle.y = Pos.at(19)
 
         microphoneValueLabel.x = Pos.at(24)
         microphoneValueLabel.y = Pos.top(of: microphoneTitle)
@@ -342,7 +369,7 @@ private final class TermKitConfigWizardApp {
 
         let pauseMediaTitle = Label("Pause media while recording:")
         pauseMediaTitle.x = Pos.at(2)
-        pauseMediaTitle.y = Pos.at(19)
+        pauseMediaTitle.y = Pos.at(21)
 
         pauseMediaValueLabel.x = Pos.at(32)
         pauseMediaValueLabel.y = Pos.top(of: pauseMediaTitle)
@@ -358,26 +385,26 @@ private final class TermKitConfigWizardApp {
 
         let apiKeyTitle = Label("OpenRouter API key (leave blank to keep current):")
         apiKeyTitle.x = Pos.at(2)
-        apiKeyTitle.y = Pos.at(21)
+        apiKeyTitle.y = Pos.at(23)
 
         apiKeySourceLabel.x = Pos.at(2)
-        apiKeySourceLabel.y = Pos.at(22)
+        apiKeySourceLabel.y = Pos.at(24)
 
         apiKeyField.x = Pos.at(2)
-        apiKeyField.y = Pos.at(23)
+        apiKeyField.y = Pos.at(25)
         apiKeyField.width = Dim.sized(72)
         apiKeyField.secret = true
         apiKeyField.colorScheme = theme.textInput
 
         clearAPIKeyCheckbox.x = Pos.at(2)
-        clearAPIKeyCheckbox.y = Pos.at(24)
+        clearAPIKeyCheckbox.y = Pos.at(26)
         clearAPIKeyCheckbox.colorScheme = theme.actionButton
 
         let saveButton = Button("_Save")
         saveButton.isDefault = true
         saveButton.colorScheme = theme.actionButton
         saveButton.x = Pos.at(2)
-        saveButton.y = Pos.at(25)
+        saveButton.y = Pos.at(27)
         saveButton.clicked = { _ in
             self.saveAndExit()
         }
@@ -397,6 +424,9 @@ private final class TermKitConfigWizardApp {
             rewriteModeTitle,
             rewriteModeValueLabel,
             rewriteModeButton,
+            asrModelTitle,
+            asrModelValueLabel,
+            asrModelButton,
             modelTitle,
             modelValueLabel,
             modelButton,
@@ -436,6 +466,37 @@ private final class TermKitConfigWizardApp {
             self.rewriteMode = options[index]
             self.refreshLabels()
             return nil
+        }
+    }
+
+    private func chooseASRModel() {
+        let options = CLIConfigOptionCatalog.asrModelChoices(current: selectedASRModel)
+        let currentIndex = options.firstIndex(of: selectedASRModel) ?? 0
+
+        presentSelectionDialog(
+            title: "ASR Model",
+            options: options,
+            selectedIndex: currentIndex
+        ) { index in
+            let selected = options[index]
+            if selected == CLIConfigOptionCatalog.customEntryLabel {
+                return { self.promptCustomASRModel() }
+            }
+            self.selectedASRModel = selected
+            self.refreshLabels()
+            return nil
+        }
+    }
+
+    private func promptCustomASRModel() {
+        presentTextEntryDialog(
+            title: "Custom ASR Model",
+            message: "Enter a model alias or Hugging Face repo id.",
+            initialValue: selectedASRModel,
+            secret: false
+        ) { value in
+            self.selectedASRModel = value
+            self.refreshLabels()
         }
     }
 
@@ -587,6 +648,7 @@ private final class TermKitConfigWizardApp {
 
     private func refreshLabels() {
         rewriteModeValueLabel.text = rewriteMode
+        asrModelValueLabel.text = selectedASRModel
         if rewriteMode == "smart" {
             modelValueLabel.text = selectedModel
         } else {
@@ -633,6 +695,7 @@ private final class TermKitConfigWizardApp {
             try store.persist(
                 shortcut: shortcutSelection,
                 rewriteMode: rewriteMode,
+                asrModel: selectedASRModel,
                 openRouterModel: rewriteMode == "smart" ? selectedModel : nil,
                 pauseMediaWhileRecording: pauseMediaWhileRecording,
                 microphone: microphoneSelection,
@@ -762,6 +825,7 @@ enum TermKitConfigWizard {
         configDir: String,
         defaultShortcut: String,
         defaultRewriteMode: String,
+        defaultASRModel: String,
         defaultOpenRouterModel: String,
         defaultPauseMediaWhileRecording: Bool
     ) -> Never {
@@ -774,6 +838,7 @@ enum TermKitConfigWizard {
             configDir: configDir,
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
+            defaultASRModel: defaultASRModel,
             defaultOpenRouterModel: defaultOpenRouterModel,
             defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
         )

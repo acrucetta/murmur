@@ -20,6 +20,17 @@ public struct CLIConfigOptionCatalog {
         "cmd+shift+space",
     ]
 
+    private static let asrModels: [String] = [
+        "moonshine",
+        "moonshine-small",
+        "moonshine-base",
+        "moonshine-tiny",
+        "qwen3-asr-1.7b",
+        "qwen3-asr-0.6b",
+        "openai/whisper-small",
+        "openai/whisper-medium",
+    ]
+
     public static func modelChoices(current: String) -> [String] {
         var choices: [String] = []
         choices.append(current)
@@ -33,6 +44,14 @@ public struct CLIConfigOptionCatalog {
         choices.append("Keep current (\(current))")
         choices.append("Reset to default (\(defaultShortcut))")
         choices.append(contentsOf: hotkeyPresets)
+        choices.append(customEntryLabel)
+        return orderedUnique(choices)
+    }
+
+    public static func asrModelChoices(current: String) -> [String] {
+        var choices: [String] = []
+        choices.append(current)
+        choices.append(contentsOf: asrModels)
         choices.append(customEntryLabel)
         return orderedUnique(choices)
     }

@@ -294,8 +294,8 @@ public final class SessionOrchestrator {
     }
 
     private func engineFinalizeFailureReason() -> String {
-        if let moonshineEngine = asrEngine as? MoonshineProcessASREngine,
-           let lastError = moonshineEngine.lastError
+        if let errorReporting = asrEngine as? ASREngineErrorReporting,
+           let lastError = errorReporting.lastEngineErrorDescription
         {
             return " reason=\(lastError)"
         }

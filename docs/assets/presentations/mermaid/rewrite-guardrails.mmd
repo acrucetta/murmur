@@ -1,0 +1,4 @@
+%%{init: {'theme': 'neutral', 'themeVariables': { 'fontSize': '24px'}}}%%
+flowchart LR
+    A["Deterministic output<br/>always available"] --> B["Rewrite model<br/>optional in smart mode"] --> C["Guardrails<br/>keep ! ? @<br/>reject long rewrites<br/>reject low overlap<br/>skip short recordings<br/>timeout -> fallback"] --> D["Final inserted text<br/>never blocked"]
+    B -. failure / timeout .-> D

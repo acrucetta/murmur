@@ -1,0 +1,49 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg5" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0fdf4"/>
+      <stop offset="100%" stop-color="#eef2ff"/>
+    </linearGradient>
+    <marker id="arrow5" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#14532d"/>
+    </marker>
+    <style>
+      .title { font: 700 44px 'Avenir Next', Arial, sans-serif; fill: #14532d; }
+      .box { stroke: #14532d; stroke-width: 2.5; rx: 20; }
+      .label { font: 700 25px 'Avenir Next', Arial, sans-serif; fill: #111827; }
+      .sub { font: 500 19px 'Avenir Next', Arial, sans-serif; fill: #374151; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="900" fill="url(#bg5)"/>
+  <text x="70" y="95" class="title">Runtime States and Recovery Path</text>
+
+  <rect class="box" x="100" y="330" width="240" height="120" fill="#dcfce7"/>
+  <text x="175" y="385" class="label">Waiting</text>
+  <text x="175" y="415" class="sub">Idle</text>
+
+  <rect class="box" x="400" y="330" width="250" height="120" fill="#bbf7d0"/>
+  <text x="455" y="385" class="label">Recording</text>
+  <text x="455" y="415" class="sub">Listening</text>
+
+  <rect class="box" x="710" y="330" width="250" height="120" fill="#a7f3d0"/>
+  <text x="760" y="385" class="label">Finalizing</text>
+  <text x="748" y="415" class="sub">Speech to text</text>
+
+  <rect class="box" x="1020" y="330" width="250" height="120" fill="#bfdbfe"/>
+  <text x="1088" y="385" class="label">Inserting</text>
+  <text x="1049" y="415" class="sub">Write into focused app</text>
+
+  <rect class="box" x="1330" y="330" width="190" height="120" fill="#fecaca"/>
+  <text x="1381" y="385" class="label">Error</text>
+  <text x="1366" y="415" class="sub">if something fails</text>
+
+  <line x1="340" y1="390" x2="400" y2="390" stroke="#14532d" stroke-width="3" marker-end="url(#arrow5)"/>
+  <line x1="650" y1="390" x2="710" y2="390" stroke="#14532d" stroke-width="3" marker-end="url(#arrow5)"/>
+  <line x1="960" y1="390" x2="1020" y2="390" stroke="#14532d" stroke-width="3" marker-end="url(#arrow5)"/>
+  <line x1="1270" y1="390" x2="1330" y2="390" stroke="#14532d" stroke-width="3" marker-end="url(#arrow5)"/>
+
+  <line x1="1425" y1="450" x2="1425" y2="600" stroke="#991b1b" stroke-width="3" marker-end="url(#arrow5)"/>
+  <line x1="1425" y1="600" x2="220" y2="600" stroke="#991b1b" stroke-width="3" marker-end="url(#arrow5)"/>
+  <line x1="220" y1="600" x2="220" y2="450" stroke="#991b1b" stroke-width="3" marker-end="url(#arrow5)"/>
+</svg>
