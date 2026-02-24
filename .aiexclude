@@ -1,0 +1,23 @@
+# Purpose: This file excludes directories and files from AI context scanning
+# to improve performance and focus on relevant source code.
+
+# Swift Package Manager
+# Excludes all build artifacts and package caches. The .build directory
+# contains compiled sources, dependencies, and other intermediate files.
+.build/
+.swiftpm/
+
+# Xcode
+# Excludes user-specific project files and the DerivedData directory where
+# Xcode stores its own build products and indexes.
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# Version Control
+.git/
+
+# Documentation
+# READMEs and other markdown files are generally not needed for code analysis.
+*.md
+Documentation/
