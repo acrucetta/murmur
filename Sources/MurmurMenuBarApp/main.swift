@@ -31,6 +31,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.pauseMediaWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.toggleModeWarning {
+            emit("warning=\(warning)")
+        }
         if let warning = arguments.microphoneWarning {
             emit("warning=\(warning)")
         }
@@ -48,6 +51,7 @@ struct MurmurMenuBarApp {
             openRouterAPIKey: arguments.openRouterAPIKey,
             openRouterRequestTimeoutSeconds: arguments.openRouterRequestTimeoutSeconds,
             pauseMediaWhileRecording: arguments.pauseMediaWhileRecording,
+            toggleMode: arguments.toggleMode,
             preferredMicrophone: arguments.preferredMicrophone
         )
 
@@ -85,6 +89,8 @@ private struct Arguments {
     let openRouterTimeoutWarning: String?
     let pauseMediaWhileRecording: Bool
     let pauseMediaWarning: String?
+    let toggleMode: Bool
+    let toggleModeWarning: String?
     let preferredMicrophone: String?
     let microphoneWarning: String?
 
@@ -106,6 +112,10 @@ private struct Arguments {
         )
         let pauseMediaResolution = resolvePauseMediaWhileRecording(
             explicit: value(after: "--pause-media-while-recording", in: rawArgs),
+            environment: environment
+        )
+        let toggleModeResolution = resolveToggleMode(
+            explicit: value(after: "--toggle-mode", in: rawArgs),
             environment: environment
         )
         let microphoneResolution = resolvePreferredMicrophone(
@@ -138,6 +148,8 @@ private struct Arguments {
             openRouterTimeoutWarning: openRouterTimeoutResolution.warning,
             pauseMediaWhileRecording: pauseMediaResolution.enabled,
             pauseMediaWarning: pauseMediaResolution.warning,
+            toggleMode: toggleModeResolution.enabled,
+            toggleModeWarning: toggleModeResolution.warning,
             preferredMicrophone: microphoneResolution.microphone,
             microphoneWarning: microphoneResolution.warning
         )
@@ -310,6 +322,35 @@ private struct Arguments {
         return (false, nil)
     }
 
+    private static func resolveToggleMode(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (enabled: Bool, warning: String?) {
+        if let explicit {
+            guard let parsed = parseBool(explicit) else {
+                return (
+                    false,
+                    "invalid toggle-mode value '\(explicit)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        if let envValue = environment["MURMUR_TOGGLE_MODE"],
+           !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard let parsed = parseBool(envValue) else {
+                return (
+                    false,
+                    "invalid MURMUR_TOGGLE_MODE '\(envValue)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        return (false, nil)
+    }
+
     private static func resolvePreferredMicrophone(
         explicit: String?,
         environment: [String: String]
@@ -366,6 +407,7 @@ private struct MenuBarConfigSnapshot {
     var rewriteMode: TranscriptRewriteMode
     var openRouterModel: String
     var pauseMediaWhileRecording: Bool
+    var toggleMode: Bool
     var preferredMicrophone: String?
     var availableMicrophones: [AudioInputDevice]
 
@@ -375,6 +417,7 @@ private struct MenuBarConfigSnapshot {
             rewriteMode: rewriteMode,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
+            toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
             availableMicrophones: availableMicrophones
         )
@@ -388,6 +431,7 @@ private struct MurmurConfigStore {
     private var rewriteModePath: String { "\(configDirectory)/rewrite_mode.txt" }
     private var openRouterModelPath: String { "\(configDirectory)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDirectory)/pause_media_while_recording.txt" }
+    private var toggleModePath: String { "\(configDirectory)/toggle_mode.txt" }
     private var microphonePath: String { "\(configDirectory)/microphone.txt" }
 
     init(configDirectory: String, fileManager: FileManager = .default) {
@@ -409,6 +453,10 @@ private struct MurmurConfigStore {
 
     func persistPauseMediaWhileRecording(_ enabled: Bool) throws {
         try writeValue(enabled ? "true" : "false", to: pauseMediaPath)
+    }
+
+    func persistToggleMode(_ enabled: Bool) throws {
+        try writeValue(enabled ? "true" : "false", to: toggleModePath)
     }
 
     func persistPreferredMicrophone(_ microphone: String?) throws {
@@ -462,6 +510,7 @@ private final class MenuBarRuntime {
     private let bridge: HotkeySessionBridge
     private let overlayController: RecordingOverlayController
     private let overlayPreviewState: OverlayPreviewState?
+    private let primaryShortcut: HotkeyShortcut
     private let configStore: MurmurConfigStore
     private var menuConfigSnapshot: MenuBarConfigSnapshot
 
@@ -478,6 +527,7 @@ private final class MenuBarRuntime {
         openRouterAPIKey: String?,
         openRouterRequestTimeoutSeconds: TimeInterval,
         pauseMediaWhileRecording: Bool,
+        toggleMode: Bool,
         preferredMicrophone: String?
     ) {
         self.menuBarController = menuBarController
@@ -485,7 +535,7 @@ private final class MenuBarRuntime {
 
         let primaryShortcut = hotkeyShortcuts.first ?? .defaultPushToTalk
         let overlayController = RecordingOverlayController(
-            promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut),
+            promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: toggleMode),
             previewState: overlayPreviewState
         )
         let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
@@ -539,6 +589,7 @@ private final class MenuBarRuntime {
             recordingMediaController = NoopRecordingMediaController()
             logger.log("pause_media_while_recording enabled=false")
         }
+        logger.log("toggle_mode enabled=\(toggleMode)")
         if let preferredMicrophone {
             logger.log("microphone_selected value=\"\(escapeLogValue(preferredMicrophone))\"")
         } else {
@@ -558,6 +609,7 @@ private final class MenuBarRuntime {
             rewriteMode: rewriteMode,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
+            toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
             availableMicrophones: availableMicrophones
         )
@@ -579,10 +631,12 @@ private final class MenuBarRuntime {
         let hotkeyController = HotkeyController(shortcuts: hotkeyShortcuts)
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
-            sessionEventHandler: orchestrator
+            sessionEventHandler: orchestrator,
+            toggleMode: toggleMode
         )
 
-        overlayController.onStopRequested = { [weak orchestrator] in
+        overlayController.onStopRequested = { [weak orchestrator, weak bridge] in
+            bridge?.resetToggleState()
             orchestrator?.handle(.shortcutReleased(.init(timestamp: Date())))
         }
         overlayController.onDismissRequested = {
@@ -597,6 +651,7 @@ private final class MenuBarRuntime {
         self.hotkeyController = hotkeyController
         self.bridge = bridge
         self.overlayController = overlayController
+        self.primaryShortcut = primaryShortcut
         self.configStore = configStore
         menuConfigSnapshot = initialMenuConfigSnapshot
 
@@ -689,6 +744,15 @@ private final class MenuBarRuntime {
                 try configStore.persistPauseMediaWhileRecording(enabled)
                 menuConfigSnapshot.pauseMediaWhileRecording = enabled
                 logger.log("menu_settings_updated key=pause_media_while_recording value=\(enabled)")
+            case .setToggleMode(let enabled):
+                try configStore.persistToggleMode(enabled)
+                menuConfigSnapshot.toggleMode = enabled
+                bridge.toggleMode = enabled
+                bridge.resetToggleState()
+                overlayController.updatePromptText(
+                    HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: enabled)
+                )
+                logger.log("menu_settings_updated key=toggle_mode value=\(enabled)")
             case .setPreferredMicrophone(let microphone):
                 try configStore.persistPreferredMicrophone(microphone)
                 menuConfigSnapshot.preferredMicrophone = microphone
@@ -856,7 +920,7 @@ private final class RecordingOverlayController {
 
     private let panel: NSPanel
     private let overlayView: RecordingOverlayView
-    private let promptText: String
+    private var promptText: String
     private let previewState: OverlayPreviewState?
 
     private var currentState: SessionState = .idle
@@ -906,6 +970,11 @@ private final class RecordingOverlayController {
         attachScreenObserverIfNeeded()
         ensureHoverTimerIfNeeded()
         updateIdleHoverFromPointer()
+    }
+
+    func updatePromptText(_ text: String) {
+        promptText = text
+        overlayView.updatePrompt(text)
     }
 
     func stop() {

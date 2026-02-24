@@ -4,8 +4,11 @@ public enum HotkeyShortcutPresentation {
         return tokens.map(displayToken(for:)).joined(separator: " + ")
     }
 
-    public static func overlayPrompt(for shortcut: HotkeyShortcut) -> String {
-        "Hold \(label(for: shortcut)) to start dictating"
+    public static func overlayPrompt(for shortcut: HotkeyShortcut, toggleMode: Bool = false) -> String {
+        if toggleMode {
+            return "Press \(label(for: shortcut)) to start dictating"
+        }
+        return "Hold \(label(for: shortcut)) to start dictating"
     }
 
     private static func displayToken(for token: String) -> String {
