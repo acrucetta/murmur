@@ -840,6 +840,7 @@ doctor() {
   echo "openrouter_api_key_present=$(openrouter_key_present)"
   echo "openrouter_api_key_source=$(openrouter_api_key_source)"
   echo "history_dir=$TRANSCRIPT_DIR"
+  echo "completion_history_file=$TRANSCRIPT_DIR/completions.log"
   if is_running; then
     echo "status=running pid=$(cat "$PID_FILE")"
   else

@@ -54,6 +54,29 @@ struct TranscriptHistoryStoreTests {
         #expect(contents.contains("fail"))
         #expect(contents.contains("insertion_failed"))
     }
+
+    @Test
+    func recordsEntryInCompletionHistoryLogFile() throws {
+        let baseDirectory = uniqueTempDirectory()
+        let store = FileTranscriptHistoryStore(baseDirectory: baseDirectory)
+        let timestamp = Date(timeIntervalSince1970: 1_771_328_800)
+
+        store.record(
+            .init(
+                timestamp: timestamp,
+                transcript: "Completion history entry.",
+                insertResult: .init(success: true, method: .clipboardPaste, error: nil)
+            )
+        )
+
+        let completionLogURL = baseDirectory.appendingPathComponent("completions.log")
+        #expect(FileManager.default.fileExists(atPath: completionLogURL.path))
+
+        let contents = try String(contentsOf: completionLogURL, encoding: .utf8)
+        #expect(contents.contains("Completion history entry."))
+        #expect(contents.contains("clipboard_paste"))
+        #expect(contents.contains("ok"))
+    }
 }
 
 private func uniqueTempDirectory() -> URL {

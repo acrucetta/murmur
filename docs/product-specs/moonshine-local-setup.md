@@ -132,6 +132,10 @@ Recording cues are emitted by the menu bar app runtime (AppKit), not by terminal
 
 Transcript history files are stored at:
 - `~/Library/Application Support/Murmur/transcriptions/`
+- `~/Library/Application Support/Murmur/transcriptions/completions.log` (append-only completion log)
+
+Clipboard fallback behavior:
+- Successful clipboard insertion keeps dictated text on the clipboard, so clipboard history tools can retain it.
 
 Optional global install for `murmur` command anywhere:
 ```bash

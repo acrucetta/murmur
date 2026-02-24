@@ -160,7 +160,8 @@ Config precedence:
 
 Media pause behavior:
 - Optional setting: `pause_media_while_recording` (`false` by default).
-- When enabled, Murmur will best-effort pause/resume Music and Spotify while recording is active.
+- When enabled, Murmur uses a deterministic volume strategy: snapshot current output volume/mute, set output volume to `0` while recording, then restore prior volume/mute on release.
+- In menu-bar runtime, changing this setting in the menu applies immediately (no app restart needed).
 - You can also override with `MURMUR_PAUSE_MEDIA_WHILE_RECORDING=true|false`.
 
 Microphone selection:
@@ -193,8 +194,22 @@ Common filters:
 rg "metric release_to_(final|insert)_ms=" /tmp/murmur-menubar.log
 rg "metric insert_(text|result)" /tmp/murmur-menubar.log
 rg "metric smart_rewrite_" /tmp/murmur-menubar.log
+rg "metric media_control_" /tmp/murmur-menubar.log
+rg "metric media_control_volume_" /tmp/murmur-menubar.log
 rg "level=info warning=" /tmp/murmur-menubar.log
 ```
+
+## History and Clipboard Behavior
+
+Murmur stores local completion history in system files under:
+
+- `~/Library/Application Support/Murmur/transcriptions/YYYY-MM-DD.txt` (daily entries)
+- `~/Library/Application Support/Murmur/transcriptions/completions.log` (append-only completion log)
+
+Clipboard fallback behavior:
+
+- When Murmur uses clipboard paste insertion, the dictated text remains on the clipboard after paste.
+- This allows clipboard history tools to retain the inserted dictation text.
 
 ## CLI Reference
 

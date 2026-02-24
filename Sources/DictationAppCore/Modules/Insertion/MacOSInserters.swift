@@ -92,7 +92,6 @@ public final class ClipboardFallbackInserter: ClipboardFallbackPasting {
         }
 
         sleeper(0.05)
-        snapshot.restore(into: pasteboard)
         return .init(success: true, method: .clipboardPaste, error: nil)
     }
 }
