@@ -642,6 +642,13 @@ private final class MenuBarRuntime {
         overlayController.onDismissRequested = {
             logger.log("overlay_dismissed")
         }
+        overlayController.onStartRequested = { [weak orchestrator, weak bridge] in
+            // This allows starting dictation by clicking the overlay.
+            // Note: If "Toggle Mode" is enabled for the hotkey, the hotkey's toggle
+            // state could become out of sync. The stop-click is designed to reset this,
+            // ensuring consistent behavior.
+            orchestrator?.handle(.shortcutPressed(.init(timestamp: Date())))
+        }
 
         self.statusUI = statusUI
         self.logger = logger
@@ -935,6 +942,7 @@ private enum OverlayPreviewState: String {
 @MainActor
 private final class RecordingOverlayController {
     var onStopRequested: (() -> Void)?
+    var onStartRequested: (() -> Void)?
     var onDismissRequested: (() -> Void)?
 
     private let panel: NSPanel
@@ -978,6 +986,9 @@ private final class RecordingOverlayController {
         }
         overlayView.onStopTap = { [weak self] in
             self?.handleStopTap()
+        }
+        overlayView.onStartTap = { [weak self] in
+            self?.handleStartTap()
         }
     }
 
@@ -1172,6 +1183,7 @@ private final class RecordingOverlayController {
         let pointer = NSEvent.mouseLocation
         let hoverArea = overlayView.idleHoverArea(in: panel)
         overlayView.setIdleHover(hoverArea.contains(pointer), animated: true)
+        panel.ignoresMouseEvents = !overlayView.allowsActionClicks
     }
 
     private func handleDismissTap() {
@@ -1200,6 +1212,13 @@ private final class RecordingOverlayController {
         onStopRequested?()
     }
 
+    private func handleStartTap() {
+        guard case .idle = currentState else {
+            return
+        }
+        onStartRequested?()
+    }
+
     private func positionPanel() {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else {
             return
@@ -1217,6 +1236,7 @@ private final class RecordingOverlayController {
 private final class RecordingOverlayView: NSView {
     var onDismissTap: (() -> Void)?
     var onStopTap: (() -> Void)?
+    var onStartTap: (() -> Void)?
 
     private let promptPill = OverlayCapsuleView()
     private let promptLabel = NSTextField(labelWithString: "")
@@ -1224,6 +1244,7 @@ private final class RecordingOverlayView: NSView {
     private let dismissBadge = OverlayBadgeView(symbolName: "xmark")
     private let stopBadge = OverlayBadgeView(symbolName: "stop.fill")
     private let meterView = OverlayMeterWaveView()
+    private let recordBadge = OverlayBadgeView(symbolName: "mic.fill")
 
     private var activityWidthConstraint: NSLayoutConstraint?
     private var activityHeightConstraint: NSLayoutConstraint?
@@ -1248,7 +1269,7 @@ private final class RecordingOverlayView: NSView {
     }
 
     var allowsActionClicks: Bool {
-        !dismissBadge.isHidden && !stopBadge.isHidden
+        !recordBadge.isHidden || !dismissBadge.isHidden || !stopBadge.isHidden
     }
 
     func updatePrompt(_ text: String) {
@@ -1321,10 +1342,12 @@ private final class RecordingOverlayView: NSView {
 
         dismissBadge.translatesAutoresizingMaskIntoConstraints = false
         stopBadge.translatesAutoresizingMaskIntoConstraints = false
+        recordBadge.translatesAutoresizingMaskIntoConstraints = false
         meterView.translatesAutoresizingMaskIntoConstraints = false
 
         activityPill.addSubview(dismissBadge)
         activityPill.addSubview(meterView)
+        activityPill.addSubview(recordBadge)
         activityPill.addSubview(stopBadge)
 
         dismissBadge.setStyle(
@@ -1335,11 +1358,18 @@ private final class RecordingOverlayView: NSView {
             fill: NSColor.systemRed.withAlphaComponent(0.70),
             symbolColor: NSColor.white.withAlphaComponent(0.86)
         )
+        recordBadge.setStyle(
+            fill: NSColor.systemGreen.withAlphaComponent(0.70),
+            symbolColor: NSColor.white.withAlphaComponent(0.86)
+        )
         dismissBadge.onTap = { [weak self] in
             self?.onDismissTap?()
         }
         stopBadge.onTap = { [weak self] in
             self?.onStopTap?()
+        }
+        recordBadge.onTap = { [weak self] in
+            self?.onStartTap?()
         }
 
         activityWidthConstraint = activityPill.widthAnchor.constraint(equalToConstant: 88)
@@ -1377,6 +1407,10 @@ private final class RecordingOverlayView: NSView {
             meterView.centerXAnchor.constraint(equalTo: activityPill.centerXAnchor),
             meterView.centerYAnchor.constraint(equalTo: activityPill.centerYAnchor),
 
+            recordBadge.centerXAnchor.constraint(equalTo: activityPill.centerXAnchor),
+            recordBadge.centerYAnchor.constraint(equalTo: activityPill.centerYAnchor),
+            recordBadge.widthAnchor.constraint(equalToConstant: 26),
+            recordBadge.heightAnchor.constraint(equalToConstant: 26),
             dismissBadge.widthAnchor.constraint(equalToConstant: 26),
             dismissBadge.heightAnchor.constraint(equalToConstant: 26),
 
@@ -1391,6 +1425,7 @@ private final class RecordingOverlayView: NSView {
         promptPill.isHidden = !style.showPrompt
         dismissBadge.isHidden = !style.showBadges
         stopBadge.isHidden = !style.showBadges
+        recordBadge.isHidden = !style.showRecordBadge
         meterView.isHidden = !style.showMeter
         meterView.setActive(style.meterActive)
 
@@ -1445,12 +1480,13 @@ private final class RecordingOverlayView: NSView {
                     showPrompt: true,
                     promptMessage: promptText,
                     promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                    showRecordBadge: true,
                     showBadges: false,
-                    showMeter: true,
+                    showMeter: false,
                     meterActive: false,
-                    activityWidth: 96,
-                    activityHeight: 26,
-                    meterWidth: 56,
+                    activityWidth: 34,
+                    activityHeight: 34,
+                    meterWidth: 0,
                     meterHeight: 10,
                     leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                     leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
@@ -1466,6 +1502,7 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: promptText,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
@@ -1487,11 +1524,12 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
                 activityWidth: 160,
-                activityHeight: 30,
+                activityHeight: 34,
                 meterWidth: 76,
                 meterHeight: 14,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
@@ -1508,11 +1546,12 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
                 activityWidth: 150,
-                activityHeight: 28,
+                activityHeight: 32,
                 meterWidth: 70,
                 meterHeight: 12,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
@@ -1529,6 +1568,7 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
@@ -1550,6 +1590,7 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: "Dictation failed. Try again.",
                 promptTextColor: NSColor.systemOrange.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
@@ -1574,6 +1615,7 @@ private struct OverlayStyle {
     let showPrompt: Bool
     let promptMessage: String?
     let promptTextColor: NSColor
+    let showRecordBadge: Bool
     let showBadges: Bool
     let showMeter: Bool
     let meterActive: Bool
