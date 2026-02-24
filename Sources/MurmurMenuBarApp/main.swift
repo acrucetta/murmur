@@ -539,7 +539,10 @@ private final class MenuBarRuntime {
             promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: toggleMode),
             previewState: overlayPreviewState
         )
-        let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
+        let statusUI = MenuBarStatusUI(
+            menuBarController: menuBarController,
+            overlayController: overlayController
+        )
         let logger = MenuBarLogger()
         let configStore = MurmurConfigStore(configDirectory: configDirectory)
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
@@ -577,9 +580,6 @@ private final class MenuBarRuntime {
             },
             onRecordingStopped: {
                 overlayController.update(state: .finalizing)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-                    overlayController.update(state: .idle)
-                }
             }
         )
         let initialRecordingMediaController = Self.makeRecordingMediaController(
@@ -830,31 +830,32 @@ private final class MenuBarRuntime {
 
 private final class MenuBarStatusUI: StatusPresenting {
     private weak var menuBarController: MenuBarController?
+    private weak var overlayController: RecordingOverlayController?
     var onError: ((FailureCode) -> Void)?
 
-    init(menuBarController: MenuBarController) {
+    init(
+        menuBarController: MenuBarController,
+        overlayController: RecordingOverlayController
+    ) {
         self.menuBarController = menuBarController
+        self.overlayController = overlayController
     }
 
     func update(state: SessionState) {
         let menuBarController = self.menuBarController
+        let overlayController = self.overlayController
         Task { @MainActor in
             menuBarController?.setState(state)
-        }
-    }
-
-    func showPermissionPrompt(_ snapshot: PermissionSnapshot) {
-        let missing = missingPermissions(from: snapshot).joined(separator: ", ")
-        let menuBarController = self.menuBarController
-        Task { @MainActor in
-            menuBarController?.setLastErrorMessage("missing permissions: \(missing)")
+            overlayController?.update(state: state)
         }
     }
 
     func showError(_ error: FailureCode) {
         let menuBarController = self.menuBarController
+        let overlayController = self.overlayController
         Task { @MainActor in
             menuBarController?.setLastErrorMessage(error.rawValue)
+            overlayController?.update(state: .error(error))
         }
         onError?(error)
     }
@@ -863,6 +864,14 @@ private final class MenuBarStatusUI: StatusPresenting {
         let menuBarController = self.menuBarController
         Task { @MainActor in
             menuBarController?.setPartialTranscript(text)
+        }
+    }
+
+    func showPermissionPrompt(_ snapshot: PermissionSnapshot) {
+        let missing = missingPermissions(from: snapshot).joined(separator: ", ")
+        let menuBarController = self.menuBarController
+        Task { @MainActor in
+            menuBarController?.setLastErrorMessage("missing permissions: \(missing)")
         }
     }
 
@@ -1049,6 +1058,12 @@ private final class RecordingOverlayController {
             overlayView.setIdleHover(false, animated: false)
         }
         apply(state: state, animated: true)
+
+        if case .error = state {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+                self?.update(state: .idle)
+            }
+        }
     }
 
     func updateAudioLevel(from frame: AudioFrame) {
@@ -1565,6 +1580,28 @@ private final class RecordingOverlayView: NSView {
             )
         case .inserting:
             return OverlayStyle(
+                showPrompt: true,
+                promptMessage: "Processing...",
+                promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
+                showBadges: false,
+                showMeter: false,
+                meterActive: false,
+                activityWidth: 0,
+                activityHeight: 0,
+                meterWidth: 0,
+                meterHeight: 0,
+                leftBadgeFill: .clear,
+                leftBadgeSymbol: .clear,
+                rightBadgeFill: .clear,
+                rightBadgeSymbol: .clear,
+                activityFill: .clear,
+                activityBorder: .clear,
+                glowColor: .clear,
+                glowRadius: 0
+            )
+        case .error:
+            return OverlayStyle(
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
@@ -1583,28 +1620,6 @@ private final class RecordingOverlayView: NSView {
                 activityFill: NSColor.white.withAlphaComponent(0.28),
                 activityBorder: NSColor.white.withAlphaComponent(0.34),
                 glowColor: NSColor.systemPink,
-                glowRadius: 0
-            )
-        case .error:
-            return OverlayStyle(
-                showPrompt: false,
-                promptMessage: "Dictation failed. Try again.",
-                promptTextColor: NSColor.systemOrange.withAlphaComponent(0.80),
-                showRecordBadge: false,
-                showBadges: false,
-                showMeter: false,
-                meterActive: false,
-                activityWidth: 40,
-                activityHeight: 8,
-                meterWidth: 34,
-                meterHeight: 8,
-                leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
-                leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
-                rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.66),
-                rightBadgeSymbol: NSColor.white.withAlphaComponent(0.84),
-                activityFill: NSColor.white.withAlphaComponent(0.28),
-                activityBorder: NSColor.systemOrange.withAlphaComponent(0.32),
-                glowColor: NSColor.systemOrange,
                 glowRadius: 0
             )
         }
