@@ -3,6 +3,21 @@ import Testing
 @testable import DictationAppCore
 
 struct GenericProcessASREngineTests {
+    final class WorkerStub: PersistentASRWorking {
+        private(set) var transcribePaths: [String] = []
+        private(set) var shutdownCallCount = 0
+        var text = "worker transcript"
+
+        func transcribe(wavPath: String) throws -> String {
+            transcribePaths.append(wavPath)
+            return text
+        }
+
+        func shutdown() {
+            shutdownCallCount += 1
+        }
+    }
+
     @Test
     func returnsTranscriptFromRunnerOutput() {
         var capturedExecutable: String?
@@ -60,5 +75,72 @@ struct GenericProcessASREngineTests {
 
         #expect(result?.text == "wav transcript")
         #expect(capturedArguments == ["scripts/transcribe_generic.py", "/tmp/sample.wav", "--model", "parakeet-v3"])
+    }
+
+    @Test
+    func usesPersistentWorkerWhenServerFlagIsPresent() {
+        let worker = WorkerStub()
+        var runCommandCallCount = 0
+        var capturedWorkerCommand: [String] = []
+        let engine = GenericProcessASREngine(
+            command: ["python3", "scripts/hf_asr_transcribe.py", "--server"],
+            model: "mlx-community/Qwen3-ASR-0.6B-4bit",
+            runCommand: { _, _ in
+                runCommandCallCount += 1
+                return ""
+            },
+            workerFactory: { command, _ in
+                capturedWorkerCommand = command
+                return worker
+            }
+        )
+
+        let result = engine.transcribeWAVFile(at: "/tmp/sample.wav")
+
+        #expect(result?.text == "worker transcript")
+        #expect(worker.transcribePaths == ["/tmp/sample.wav"])
+        #expect(capturedWorkerCommand.contains("--server"))
+        #expect(capturedWorkerCommand == [
+            "python3",
+            "scripts/hf_asr_transcribe.py",
+            "--server",
+            "--model",
+            "mlx-community/Qwen3-ASR-0.6B-4bit",
+        ])
+        #expect(runCommandCallCount == 0)
+
+        engine.shutdown()
+        #expect(worker.shutdownCallCount == 1)
+    }
+
+    @Test
+    func usesExistingWorkerModelArgumentWhenAlreadyPresent() {
+        let worker = WorkerStub()
+        var capturedWorkerCommand: [String] = []
+        let engine = GenericProcessASREngine(
+            command: [
+                "python3",
+                "scripts/hf_asr_transcribe.py",
+                "--server",
+                "--model",
+                "configured-model",
+            ],
+            model: "should-not-be-used",
+            runCommand: { _, _ in "" },
+            workerFactory: { command, _ in
+                capturedWorkerCommand = command
+                return worker
+            }
+        )
+
+        _ = engine.transcribeWAVFile(at: "/tmp/sample.wav")
+
+        #expect(capturedWorkerCommand == [
+            "python3",
+            "scripts/hf_asr_transcribe.py",
+            "--server",
+            "--model",
+            "configured-model",
+        ])
     }
 }

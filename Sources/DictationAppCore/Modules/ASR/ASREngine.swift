@@ -13,8 +13,16 @@ public protocol ASRWAVTranscribing {
     func transcribeWAVFile(at path: String) -> FinalTranscript?
 }
 
+public protocol ASREngineLifecycle {
+    func shutdown()
+}
+
 public extension ASREngining {
     var providesFinalTranscriptOnStop: Bool { false }
+}
+
+public extension ASREngineLifecycle {
+    func shutdown() {}
 }
 
 public final class ASREngine: ASREngining {

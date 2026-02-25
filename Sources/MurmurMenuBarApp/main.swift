@@ -702,6 +702,7 @@ private final class MenuBarRuntime {
 
     func stop() {
         bridge.stop()
+        (asrEngine as? ASREngineLifecycle)?.shutdown()
         Task { @MainActor in
             overlayController.stop()
         }

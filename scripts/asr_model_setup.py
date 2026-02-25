@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import pathlib
+import platform
 import subprocess
 import sys
 
@@ -54,6 +55,17 @@ def modules_available(module_names: list[str]) -> bool:
         except Exception:
             return False
     return True
+
+
+def required_transformers_model_type(model_id: str) -> str | None:
+    normalized = model_id.strip().lower()
+    if "qwen3-asr" in normalized:
+        return "qwen3_asr"
+    return None
+
+
+def is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
 def ensure_moonshine_assets(spec: ASRModelSpec, python_bin: str, skip_download: bool) -> None:
@@ -114,6 +126,10 @@ def ensure_huggingface_assets(spec: ASRModelSpec, python_bin: str, skip_download
             ],
         )
 
+    required_model_type = required_transformers_model_type(spec.setup_model_ref)
+    if required_model_type == "qwen3_asr" and not modules_available(["qwen_asr"]):
+        ensure_python_packages(python_bin, ["qwen-asr"])
+
     if skip_download:
         return
 
@@ -123,6 +139,30 @@ def ensure_huggingface_assets(spec: ASRModelSpec, python_bin: str, skip_download
 
     if not _huggingface_snapshot_download(spec.setup_model_ref, local_files_only=False):
         raise RuntimeError(f"failed to download Hugging Face model '{spec.setup_model_ref}'")
+
+
+def ensure_mlx_assets(spec: ASRModelSpec, python_bin: str, skip_download: bool) -> None:
+    if not is_apple_silicon():
+        raise RuntimeError("mlx runtime is only supported on Apple Silicon; use huggingface runtime on this machine")
+
+    if not modules_available(["mlx", "mlx_audio", "huggingface_hub"]):
+        ensure_python_packages(
+            python_bin,
+            [
+                "mlx>=0.23",
+                "mlx-audio>=0.2",
+                "huggingface_hub>=0.24",
+            ],
+        )
+
+    if skip_download:
+        return
+
+    if _huggingface_snapshot_download(spec.setup_model_ref, local_files_only=True):
+        return
+
+    if not _huggingface_snapshot_download(spec.setup_model_ref, local_files_only=False):
+        raise RuntimeError(f"failed to download MLX model '{spec.setup_model_ref}'")
 
 
 def emit_spec(spec: ASRModelSpec, python_bin: str) -> None:
@@ -159,6 +199,8 @@ def run_ensure(model: str, root_dir: str, python_bin: str, skip_download: bool) 
     spec = resolve_model_spec(model, root_dir=pathlib.Path(root_dir))
     if spec.setup_kind == "moonshine":
         ensure_moonshine_assets(spec, python_bin=python_bin, skip_download=skip_download)
+    elif spec.setup_kind == "mlx":
+        ensure_mlx_assets(spec, python_bin=python_bin, skip_download=skip_download)
     elif spec.setup_kind == "huggingface":
         ensure_huggingface_assets(spec, python_bin=python_bin, skip_download=skip_download)
     else:  # pragma: no cover - guard for future extensions

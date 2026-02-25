@@ -21,8 +21,9 @@ public enum ASREngineFactory {
                 fileManager: fileManager
             )
         case .generic:
+            let configuredCommand = configuredGenericCommand(command: command)
             return GenericProcessASREngine(
-                command: command,
+                command: configuredCommand,
                 model: model,
                 fileManager: fileManager
             )
@@ -50,5 +51,36 @@ public enum ASREngineFactory {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .contains("moonshine")
+    }
+
+    static func configuredGenericCommand(command: [String]) -> [String] {
+        guard shouldEnablePersistentWorker(command: command) else {
+            return command
+        }
+
+        if command.contains("--server") {
+            return command
+        }
+        return command + ["--server"]
+    }
+
+    private static func shouldEnablePersistentWorker(command: [String]) -> Bool {
+        guard isAppleSilicon() else {
+            return false
+        }
+        return command.contains { component in
+            component
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .contains("hf_asr_transcribe.py")
+        }
+    }
+
+    static func isAppleSilicon() -> Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
     }
 }

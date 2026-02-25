@@ -1,6 +1,7 @@
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -15,13 +16,34 @@ class ASRModelCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root_dir = pathlib.Path("/repo")
 
-    def test_resolves_qwen_alias_to_generic_huggingface(self) -> None:
+    @patch("asr_model_catalog.is_apple_silicon", return_value=True)
+    def test_resolves_qwen_alias_to_generic_mlx_on_apple_silicon(self, _is_apple_silicon) -> None:
+        spec = resolve_model_spec("qwen3-asr-1.7b", root_dir=self.root_dir)
+
+        self.assertEqual(spec.provider, "generic")
+        self.assertEqual(spec.runtime_model, "mlx-community/Qwen3-ASR-1.7B-4bit")
+        self.assertTrue(spec.runtime_script.endswith("scripts/hf_asr_transcribe.py"))
+        self.assertFalse(spec.trust_remote_code)
+        self.assertEqual(spec.setup_kind, "mlx")
+
+    @patch("asr_model_catalog.is_apple_silicon", return_value=False)
+    def test_resolves_qwen_alias_to_generic_huggingface_off_apple_silicon(self, _is_apple_silicon) -> None:
         spec = resolve_model_spec("qwen3-asr-1.7b", root_dir=self.root_dir)
 
         self.assertEqual(spec.provider, "generic")
         self.assertEqual(spec.runtime_model, "Qwen/Qwen3-ASR-1.7B")
         self.assertTrue(spec.runtime_script.endswith("scripts/hf_asr_transcribe.py"))
         self.assertTrue(spec.trust_remote_code)
+        self.assertEqual(spec.setup_kind, "huggingface")
+
+    @patch("asr_model_catalog.is_apple_silicon", return_value=True)
+    def test_resolves_legacy_raw_qwen_repo_to_mlx_on_apple_silicon(self, _is_apple_silicon) -> None:
+        spec = resolve_model_spec("Qwen/Qwen3-ASR-1.7B", root_dir=self.root_dir)
+
+        self.assertEqual(spec.provider, "generic")
+        self.assertEqual(spec.runtime_model, "mlx-community/Qwen3-ASR-1.7B-4bit")
+        self.assertEqual(spec.setup_kind, "mlx")
+        self.assertFalse(spec.trust_remote_code)
 
     def test_resolves_moonshine_prefixed_model(self) -> None:
         spec = resolve_model_spec("moonshine:small-streaming-en", root_dir=self.root_dir)
@@ -57,6 +79,8 @@ class ASRModelCatalogTests(unittest.TestCase):
         self.assertIn("moonshine-small", aliases)
         self.assertIn("moonshine-base", aliases)
         self.assertIn("moonshine-tiny", aliases)
+        self.assertIn("qwen3-asr-0.6b", aliases)
+        self.assertIn("qwen3-asr-1.7b", aliases)
 
 
 if __name__ == "__main__":

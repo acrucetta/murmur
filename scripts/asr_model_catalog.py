@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import platform
 
 _KNOWN_MOONSHINE_ARCHES = {
     "tiny",
@@ -37,6 +38,12 @@ class ASRModelCatalogEntry:
 
 _QWEN_17B = "Qwen/Qwen3-ASR-1.7B"
 _QWEN_06B = "Qwen/Qwen3-ASR-0.6B"
+_QWEN_17B_MLX = "mlx-community/Qwen3-ASR-1.7B-4bit"
+_QWEN_06B_MLX = "mlx-community/Qwen3-ASR-0.6B-4bit"
+
+
+def is_apple_silicon() -> bool:
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 _CATALOG_ALIASES: dict[str, tuple[str, str, str, bool]] = {
     "moonshine": ("moonshine", "medium-streaming-en", "moonshine", False),
@@ -64,6 +71,8 @@ _CATALOG_ALIASES: dict[str, tuple[str, str, str, bool]] = {
     "qwen3-asr-0.6b": ("generic", _QWEN_06B, "huggingface", True),
     "qwen3-0.6b": ("generic", _QWEN_06B, "huggingface", True),
     "qwen-0.6b": ("generic", _QWEN_06B, "huggingface", True),
+    "qwen3-asr-1.7b-mlx": ("generic", _QWEN_17B_MLX, "mlx", False),
+    "qwen3-asr-0.6b-mlx": ("generic", _QWEN_06B_MLX, "mlx", False),
 }
 
 _CATALOG_ENTRIES: list[ASRModelCatalogEntry] = [
@@ -100,14 +109,14 @@ _CATALOG_ENTRIES: list[ASRModelCatalogEntry] = [
     ASRModelCatalogEntry(
         alias="qwen3-asr-0.6b",
         provider="generic",
-        runtime_model=_QWEN_06B,
-        note="Qwen ASR via Hugging Face transformers runtime.",
+        runtime_model=_QWEN_06B_MLX,
+        note="Qwen ASR via MLX 4-bit runtime on Apple Silicon; PyTorch fallback elsewhere.",
     ),
     ASRModelCatalogEntry(
         alias="qwen3-asr-1.7b",
         provider="generic",
-        runtime_model=_QWEN_17B,
-        note="Higher-accuracy Qwen ASR via transformers runtime.",
+        runtime_model=_QWEN_17B_MLX,
+        note="Higher-accuracy Qwen ASR via MLX 4-bit runtime on Apple Silicon; PyTorch fallback elsewhere.",
     ),
 ]
 
@@ -145,6 +154,14 @@ def resolve_model_spec(requested_model: str, root_dir: Path) -> ASRModelSpec:
 
     if normalized in _CATALOG_ALIASES:
         provider, runtime_model, setup_kind, trust_remote_code = _CATALOG_ALIASES[normalized]
+        if normalized in {"qwen3-asr-0.6b", "qwen3-0.6b", "qwen-0.6b"} and is_apple_silicon():
+            runtime_model = _QWEN_06B_MLX
+            setup_kind = "mlx"
+            trust_remote_code = False
+        if normalized in {"qwen3-asr-1.7b", "qwen3-1.7b", "qwen-1.7b"} and is_apple_silicon():
+            runtime_model = _QWEN_17B_MLX
+            setup_kind = "mlx"
+            trust_remote_code = False
     elif normalized.startswith("moonshine:"):
         provider = "moonshine"
         runtime_model = requested.split(":", 1)[1].strip() or "medium-streaming-en"
@@ -162,6 +179,16 @@ def resolve_model_spec(requested_model: str, root_dir: Path) -> ASRModelSpec:
         runtime_model = requested
         setup_kind = "huggingface"
         trust_remote_code = "qwen" in runtime_model.lower()
+        normalized_runtime = runtime_model.strip().lower()
+        if is_apple_silicon():
+            if normalized_runtime == _QWEN_06B.lower():
+                runtime_model = _QWEN_06B_MLX
+                setup_kind = "mlx"
+                trust_remote_code = False
+            elif normalized_runtime == _QWEN_17B.lower():
+                runtime_model = _QWEN_17B_MLX
+                setup_kind = "mlx"
+                trust_remote_code = False
     else:
         raise ValueError(
             "unknown model id. Use a known alias (e.g. qwen3-asr-1.7b, moonshine) "

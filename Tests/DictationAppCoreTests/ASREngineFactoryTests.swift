@@ -51,4 +51,22 @@ struct ASREngineFactoryTests {
 
         #expect(engine is GenericProcessASREngine)
     }
+
+    @Test
+    func configuredGenericCommandDoesNotChangeNonHFCommand() {
+        let configured = ASREngineFactory.configuredGenericCommand(
+            command: ["python3", "scripts/transcribe_generic.py"]
+        )
+
+        #expect(configured == ["python3", "scripts/transcribe_generic.py"])
+    }
+
+    @Test
+    func configuredGenericCommandIsIdempotentForServerFlag() {
+        let configured = ASREngineFactory.configuredGenericCommand(
+            command: ["python3", "scripts/hf_asr_transcribe.py", "--server"]
+        )
+
+        #expect(configured == ["python3", "scripts/hf_asr_transcribe.py", "--server"])
+    }
 }

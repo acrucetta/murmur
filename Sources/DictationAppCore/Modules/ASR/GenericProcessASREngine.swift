@@ -1,7 +1,8 @@
 import Foundation
 
-public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting, ASRWAVTranscribing {
+public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting, ASRWAVTranscribing, ASREngineLifecycle {
     public typealias CommandRunner = (_ executable: String, _ arguments: [String]) throws -> String
+    public typealias WorkerFactory = (_ command: [String], _ model: String) -> PersistentASRWorking
 
     public enum EngineError: Error, Equatable {
         case invalidCommand
@@ -15,9 +16,11 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
     private let command: [String]
     private let model: String
     private let runCommand: CommandRunner
+    private let workerFactory: WorkerFactory
     private let fileManager: FileManager
     private var bufferedSamples: [Float] = []
     private var sampleRate: Int = 16_000
+    private var worker: PersistentASRWorking?
 
     public private(set) var lastError: EngineError?
     public var lastEngineErrorDescription: String? {
@@ -35,6 +38,9 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         self.command = command
         self.model = model
         self.runCommand = GenericProcessASREngine.defaultRunCommand
+        self.workerFactory = { workerCommand, _ in
+            PersistentASRWorker(command: workerCommand)
+        }
         self.fileManager = fileManager
     }
 
@@ -42,11 +48,15 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         command: [String],
         model: String = "default",
         runCommand: @escaping CommandRunner,
+        workerFactory: WorkerFactory? = nil,
         fileManager: FileManager = .default
     ) {
         self.command = command
         self.model = model
         self.runCommand = runCommand
+        self.workerFactory = workerFactory ?? { workerCommand, _ in
+            PersistentASRWorker(command: workerCommand)
+        }
         self.fileManager = fileManager
     }
 
@@ -78,9 +88,14 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
             let wavURL = try writeTemporaryWAV(samples: bufferedSamples, sampleRate: sampleRate, channels: 1)
             defer { try? fileManager.removeItem(at: wavURL) }
 
-            let executable = command[0]
-            let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
-            let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+            let output: String
+            if usesPersistentWorker {
+                output = try workerInstance().transcribe(wavPath: wavURL.path).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let executable = command[0]
+                let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
+                output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
 
             guard !output.isEmpty else {
                 lastError = .emptyTranscription
@@ -92,7 +107,7 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
             lastError = error
             return nil
         } catch {
-            lastError = .commandFailed(error.localizedDescription)
+            lastError = .commandFailed(Self.describe(error: error))
             return nil
         }
     }
@@ -104,9 +119,14 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         }
 
         do {
-            let executable = command[0]
-            let arguments = Array(command.dropFirst()) + [path, "--model", model]
-            let output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+            let output: String
+            if usesPersistentWorker {
+                output = try workerInstance().transcribe(wavPath: path).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let executable = command[0]
+                let arguments = Array(command.dropFirst()) + [path, "--model", model]
+                output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             guard !output.isEmpty else {
                 lastError = .emptyTranscription
                 return nil
@@ -116,9 +136,62 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
             lastError = error
             return nil
         } catch {
-            lastError = .commandFailed(error.localizedDescription)
+            lastError = .commandFailed(Self.describe(error: error))
             return nil
         }
+    }
+
+    public func shutdown() {
+        worker?.shutdown()
+        worker = nil
+    }
+
+    private var usesPersistentWorker: Bool {
+        command.contains("--server")
+    }
+
+    private func workerInstance() -> PersistentASRWorking {
+        if let worker {
+            return worker
+        }
+        let created = workerFactory(normalizedWorkerCommand(), model)
+        worker = created
+        return created
+    }
+
+    private func normalizedWorkerCommand() -> [String] {
+        guard usesPersistentWorker else {
+            return command
+        }
+
+        var normalized = command
+        if !Self.commandHasModelArgument(normalized) {
+            normalized.append(contentsOf: ["--model", model])
+        }
+        return normalized
+    }
+
+    private static func commandHasModelArgument(_ command: [String]) -> Bool {
+        guard let modelIndex = command.firstIndex(of: "--model") else {
+            return false
+        }
+
+        let valueIndex = command.index(after: modelIndex)
+        guard valueIndex < command.endIndex else {
+            return false
+        }
+
+        let modelValue = command[valueIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        return !modelValue.isEmpty && !modelValue.hasPrefix("--")
+    }
+
+    private static func describe(error: Error) -> String {
+        if let description = (error as? LocalizedError)?.errorDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !description.isEmpty
+        {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func writeTemporaryWAV(samples: [Float], sampleRate: Int, channels: Int) throws -> URL {
