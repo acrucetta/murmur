@@ -61,20 +61,27 @@ struct GenericProcessASREngineTests {
 
     @Test
     func transcribeWAVUsesGenericArguments() {
-        var capturedArguments: [String] = []
+        var capturedArguments: [[String]] = []
+        var activeModel = "parakeet-v3"
         let engine = GenericProcessASREngine(
             command: ["python3", "scripts/transcribe_generic.py"],
             model: "parakeet-v3",
             runCommand: { _, arguments in
-                capturedArguments = arguments
+                capturedArguments.append(arguments)
                 return "wav transcript"
-            }
+            },
+            modelProvider: { activeModel }
         )
 
-        let result = engine.transcribeWAVFile(at: "/tmp/sample.wav")
+        let first = engine.transcribeWAVFile(at: "/tmp/sample.wav")
+        activeModel = "parakeet-v4"
+        let second = engine.transcribeWAVFile(at: "/tmp/sample2.wav")
 
-        #expect(result?.text == "wav transcript")
-        #expect(capturedArguments == ["scripts/transcribe_generic.py", "/tmp/sample.wav", "--model", "parakeet-v3"])
+        #expect(first?.text == "wav transcript")
+        #expect(second?.text == "wav transcript")
+        #expect(capturedArguments.count == 2)
+        #expect(capturedArguments[0] == ["scripts/transcribe_generic.py", "/tmp/sample.wav", "--model", "parakeet-v3"])
+        #expect(capturedArguments[1] == ["scripts/transcribe_generic.py", "/tmp/sample2.wav", "--model", "parakeet-v4"])
     }
 
     @Test
@@ -142,5 +149,56 @@ struct GenericProcessASREngineTests {
             "--model",
             "configured-model",
         ])
+    }
+
+    @Test
+    func restartsPersistentWorkerWhenModelProviderChanges() {
+        let firstWorker = WorkerStub()
+        firstWorker.text = "first model"
+        let secondWorker = WorkerStub()
+        secondWorker.text = "second model"
+        var workerCreateCount = 0
+        var capturedWorkerCommands: [[String]] = []
+        var configuredModel = "mlx-community/Qwen3-ASR-0.6B-4bit"
+
+        let engine = GenericProcessASREngine(
+            command: ["python3", "scripts/hf_asr_transcribe.py", "--server"],
+            model: "fallback",
+            runCommand: { _, _ in "" },
+            workerFactory: { command, _ in
+                capturedWorkerCommands.append(command)
+                workerCreateCount += 1
+                return workerCreateCount == 1 ? firstWorker : secondWorker
+            },
+            modelProvider: { configuredModel }
+        )
+
+        let first = engine.transcribeWAVFile(at: "/tmp/first.wav")
+        configuredModel = "mlx-community/Qwen3-ASR-1.7B-4bit"
+        let second = engine.transcribeWAVFile(at: "/tmp/second.wav")
+
+        #expect(first?.text == "first model")
+        #expect(second?.text == "second model")
+        #expect(workerCreateCount == 2)
+        #expect(firstWorker.shutdownCallCount == 1)
+        #expect(secondWorker.shutdownCallCount == 0)
+        #expect(capturedWorkerCommands == [
+            [
+                "python3",
+                "scripts/hf_asr_transcribe.py",
+                "--server",
+                "--model",
+                "mlx-community/Qwen3-ASR-0.6B-4bit",
+            ],
+            [
+                "python3",
+                "scripts/hf_asr_transcribe.py",
+                "--server",
+                "--model",
+                "mlx-community/Qwen3-ASR-1.7B-4bit",
+            ],
+        ])
+        #expect(firstWorker.transcribePaths == ["/tmp/first.wav"])
+        #expect(secondWorker.transcribePaths == ["/tmp/second.wav"])
     }
 }

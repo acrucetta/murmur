@@ -667,7 +667,7 @@ shortcut_get() {
 
 show_restart_note_if_running() {
   if is_running; then
-    echo "note: stop and start murmur for config changes to apply"
+    echo "note: ASR model updates apply on the next recording; other config changes may still require stop/start"
   fi
 }
 
@@ -758,6 +758,24 @@ config_set_interactive() {
   if ! run_swift_config_wizard; then
     return $?
   fi
+
+  local configured_asr_model python_bin asr_skip_download_env normalized_skip asr_skip_download=0
+  configured_asr_model="$(resolve_asr_model)"
+  asr_skip_download_env="$(trim "${MURMUR_ASR_SKIP_DOWNLOAD:-}")"
+  if [[ -n "$asr_skip_download_env" ]]; then
+    if normalized_skip="$(normalize_boolean "$asr_skip_download_env" 2>/dev/null)"; then
+      if [[ "$normalized_skip" == "true" ]]; then
+        asr_skip_download=1
+      fi
+    else
+      echo "warning: invalid MURMUR_ASR_SKIP_DOWNLOAD '$asr_skip_download_env'; expected true|false" >&2
+    fi
+  fi
+  python_bin="$(resolve_python)"
+  if ! ensure_asr_runtime_ready "$configured_asr_model" "$python_bin" "$asr_skip_download"; then
+    return 1
+  fi
+  write_config_value "$ASR_MODEL_FILE" "$ASR_RUNTIME_MODEL"
 
   echo "config updated:"
   config_get
@@ -888,7 +906,22 @@ config_set_non_interactive() {
 
   asr_model="$(trim "$asr_model")"
   if [[ -n "$asr_model" ]]; then
-    write_config_value "$ASR_MODEL_FILE" "$asr_model"
+    local asr_skip_download=0 asr_skip_download_env normalized_skip python_bin
+    asr_skip_download_env="$(trim "${MURMUR_ASR_SKIP_DOWNLOAD:-}")"
+    if [[ -n "$asr_skip_download_env" ]]; then
+      if normalized_skip="$(normalize_boolean "$asr_skip_download_env" 2>/dev/null)"; then
+        if [[ "$normalized_skip" == "true" ]]; then
+          asr_skip_download=1
+        fi
+      else
+        echo "warning: invalid MURMUR_ASR_SKIP_DOWNLOAD '$asr_skip_download_env'; expected true|false" >&2
+      fi
+    fi
+    python_bin="$(resolve_python)"
+    if ! ensure_asr_runtime_ready "$asr_model" "$python_bin" "$asr_skip_download"; then
+      return 1
+    fi
+    write_config_value "$ASR_MODEL_FILE" "$ASR_RUNTIME_MODEL"
   fi
 
   if [[ -n "$pause_media" ]]; then

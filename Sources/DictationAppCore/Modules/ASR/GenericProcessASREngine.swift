@@ -3,6 +3,7 @@ import Foundation
 public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting, ASRWAVTranscribing, ASREngineLifecycle {
     public typealias CommandRunner = (_ executable: String, _ arguments: [String]) throws -> String
     public typealias WorkerFactory = (_ command: [String], _ model: String) -> PersistentASRWorking
+    public typealias ModelProvider = () -> String
 
     public enum EngineError: Error, Equatable {
         case invalidCommand
@@ -17,10 +18,12 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
     private let model: String
     private let runCommand: CommandRunner
     private let workerFactory: WorkerFactory
+    private let modelProvider: ModelProvider
     private let fileManager: FileManager
     private var bufferedSamples: [Float] = []
     private var sampleRate: Int = 16_000
     private var worker: PersistentASRWorking?
+    private var workerCommand: [String]?
 
     public private(set) var lastError: EngineError?
     public var lastEngineErrorDescription: String? {
@@ -33,6 +36,7 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
     public init(
         command: [String],
         model: String = "default",
+        modelProvider: ModelProvider? = nil,
         fileManager: FileManager = .default
     ) {
         self.command = command
@@ -41,6 +45,7 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         self.workerFactory = { workerCommand, _ in
             PersistentASRWorker(command: workerCommand)
         }
+        self.modelProvider = modelProvider ?? { model }
         self.fileManager = fileManager
     }
 
@@ -49,6 +54,7 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         model: String = "default",
         runCommand: @escaping CommandRunner,
         workerFactory: WorkerFactory? = nil,
+        modelProvider: ModelProvider? = nil,
         fileManager: FileManager = .default
     ) {
         self.command = command
@@ -57,6 +63,7 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         self.workerFactory = workerFactory ?? { workerCommand, _ in
             PersistentASRWorker(command: workerCommand)
         }
+        self.modelProvider = modelProvider ?? { model }
         self.fileManager = fileManager
     }
 
@@ -87,13 +94,14 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         do {
             let wavURL = try writeTemporaryWAV(samples: bufferedSamples, sampleRate: sampleRate, channels: 1)
             defer { try? fileManager.removeItem(at: wavURL) }
+            let resolvedModel = currentModel()
 
             let output: String
             if usesPersistentWorker {
-                output = try workerInstance().transcribe(wavPath: wavURL.path).trimmingCharacters(in: .whitespacesAndNewlines)
+                output = try workerInstance(model: resolvedModel).transcribe(wavPath: wavURL.path).trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 let executable = command[0]
-                let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", model]
+                let arguments = Array(command.dropFirst()) + [wavURL.path, "--model", resolvedModel]
                 output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
             }
 
@@ -119,12 +127,13 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
         }
 
         do {
+            let resolvedModel = currentModel()
             let output: String
             if usesPersistentWorker {
-                output = try workerInstance().transcribe(wavPath: path).trimmingCharacters(in: .whitespacesAndNewlines)
+                output = try workerInstance(model: resolvedModel).transcribe(wavPath: path).trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 let executable = command[0]
-                let arguments = Array(command.dropFirst()) + [path, "--model", model]
+                let arguments = Array(command.dropFirst()) + [path, "--model", resolvedModel]
                 output = try runCommand(executable, arguments).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             guard !output.isEmpty else {
@@ -144,22 +153,27 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
     public func shutdown() {
         worker?.shutdown()
         worker = nil
+        workerCommand = nil
     }
 
     private var usesPersistentWorker: Bool {
         command.contains("--server")
     }
 
-    private func workerInstance() -> PersistentASRWorking {
-        if let worker {
+    private func workerInstance(model: String) -> PersistentASRWorking {
+        let resolvedWorkerCommand = normalizedWorkerCommand(model: model)
+        if let worker, workerCommand == resolvedWorkerCommand {
             return worker
         }
-        let created = workerFactory(normalizedWorkerCommand(), model)
+        worker?.shutdown()
+
+        let created = workerFactory(resolvedWorkerCommand, model)
         worker = created
+        workerCommand = resolvedWorkerCommand
         return created
     }
 
-    private func normalizedWorkerCommand() -> [String] {
+    private func normalizedWorkerCommand(model: String) -> [String] {
         guard usesPersistentWorker else {
             return command
         }
@@ -169,6 +183,14 @@ public final class GenericProcessASREngine: ASREngining, ASREngineErrorReporting
             normalized.append(contentsOf: ["--model", model])
         }
         return normalized
+    }
+
+    private func currentModel() -> String {
+        let configured = modelProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !configured.isEmpty else {
+            return model
+        }
+        return configured
     }
 
     private static func commandHasModelArgument(_ command: [String]) -> Bool {

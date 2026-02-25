@@ -10,6 +10,7 @@ public enum ASREngineFactory {
         command: [String],
         model: String,
         offline: Bool = true,
+        modelProvider: GenericProcessASREngine.ModelProvider? = nil,
         fileManager: FileManager = .default
     ) -> ASREngining {
         switch inferRuntime(command: command, model: model) {
@@ -25,6 +26,7 @@ public enum ASREngineFactory {
             return GenericProcessASREngine(
                 command: configuredCommand,
                 model: model,
+                modelProvider: modelProvider,
                 fileManager: fileManager
             )
         }

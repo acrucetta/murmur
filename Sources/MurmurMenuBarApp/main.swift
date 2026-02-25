@@ -416,6 +416,7 @@ private struct MurmurConfigStore {
     private let configDirectory: String
     private let fileManager: FileManager
 
+    private var asrModelPath: String { "\(configDirectory)/asr_model.txt" }
     private var rewriteModePath: String { "\(configDirectory)/rewrite_mode.txt" }
     private var openRouterModelPath: String { "\(configDirectory)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDirectory)/pause_media_while_recording.txt" }
@@ -454,6 +455,22 @@ private struct MurmurConfigStore {
         } else {
             try writeValue(trimmed, to: microphonePath)
         }
+    }
+
+    func currentASRModel(fallback: String) -> String {
+        guard let value = try? String(contentsOfFile: asrModelPath, encoding: .utf8) else {
+            return fallback
+        }
+
+        let firstLine = value
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? value
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return fallback
+        }
+        return trimmed
     }
 
     private func ensureConfigDirectory() throws {
@@ -525,12 +542,17 @@ private final class MenuBarRuntime {
         let configStore = MurmurConfigStore(configDirectory: configDirectory)
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
         let transcriptHistory = FileTranscriptHistoryStore()
+        let currentASRModel = {
+            configStore.currentASRModel(fallback: asrModel)
+        }
+        let resolvedASRModel = currentASRModel()
         let asrEngine = ASREngineFactory.makeProcessEngine(
             command: [pythonBinary, scriptPath],
-            model: asrModel
+            model: resolvedASRModel,
+            modelProvider: currentASRModel
         )
-        let runtimeLabel = inferASRRuntimeLabel(command: [pythonBinary, scriptPath], model: asrModel)
-        logger.log("asr_runtime=\(runtimeLabel) asr_model=\"\(escapeLogValue(asrModel))\"")
+        let runtimeLabel = inferASRRuntimeLabel(command: [pythonBinary, scriptPath], model: resolvedASRModel)
+        logger.log("asr_runtime=\(runtimeLabel) asr_model=\"\(escapeLogValue(resolvedASRModel))\"")
         let contextProvider = AppRewriteContextProvider(mode: rewriteMode)
         let transcriptRewriter: TranscriptRewriting
         if rewriteMode == .smart,
