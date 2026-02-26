@@ -1,14 +1,13 @@
-import Testing
+import XCTest
 @testable import DictationAppCore
 
-struct CLIConfigOptionCatalogTests {
-    @Test
-    func modelChoicesIncludesCurrentAndCustom() {
+final class CLIConfigOptionCatalogTests: XCTestCase {
+    func testModelChoicesIncludesCurrentAndCustom() {
         let choices = CLIConfigOptionCatalog.modelChoices(current: "custom/provider-model")
 
-        #expect(choices.first == "custom/provider-model")
-        #expect(choices.contains("mistralai/mistral-small-3.1-24b-instruct"))
-        #expect(choices.last == CLIConfigOptionCatalog.customEntryLabel)
+        XCTAssertEqual(choices.first, "custom/provider-model")
+        XCTAssertTrue(choices.contains("mistralai/mistral-small-3.1-24b-instruct"))
+        XCTAssertEqual(choices.last, CLIConfigOptionCatalog.customEntryLabel)
     }
 
     @Test

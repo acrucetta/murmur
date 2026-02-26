@@ -1,9 +1,8 @@
-import Testing
+import XCTest
 @testable import DictationAppCore
 
-struct AppleScriptRecordingMediaControllerTests {
-    @Test
-    func volumeOnlyModeDoesNotSendAppOrBrowserPauseScripts() {
+final class AppleScriptRecordingMediaControllerTests: XCTestCase {
+    func testVolumeOnlyModeDoesNotSendAppOrBrowserPauseScripts() {
         var sawAppOrBrowserControlScript = false
 
         let controller = AppleScriptRecordingMediaController(
@@ -28,11 +27,10 @@ struct AppleScriptRecordingMediaControllerTests {
         controller.pauseMediaForRecording()
         controller.resumeMediaAfterRecording()
 
-        #expect(sawAppOrBrowserControlScript == false)
+        XCTAssertEqual(sawAppOrBrowserControlScript, false)
     }
 
-    @Test
-    func mutesSystemVolumeDuringRecordingAndRestoresAfter() {
+    func testMutesSystemVolumeDuringRecordingAndRestoresAfter() {
         var sawMuteCommand = false
         var sawRestoreCommand = false
 
@@ -58,32 +56,44 @@ struct AppleScriptRecordingMediaControllerTests {
         controller.pauseMediaForRecording()
         controller.resumeMediaAfterRecording()
 
-        #expect(sawMuteCommand == true)
-        #expect(sawRestoreCommand == true)
+        XCTAssertEqual(sawMuteCommand, true)
+        XCTAssertEqual(sawRestoreCommand, true)
     }
 }
 
-struct SwitchableRecordingMediaControllerTests {
-    @Test
-    func delegatesToCurrentControllerAndCanSwapAtRuntime() {
+final class SwitchableRecordingMediaControllerTests: XCTestCase {
+    private class RecordingMediaSpy: RecordingMediaControlling {
+        var pauseCallCount = 0
+        var resumeCallCount = 0
+
+        func pauseMediaForRecording() {
+            pauseCallCount += 1
+        }
+
+        func resumeMediaAfterRecording() {
+            resumeCallCount += 1
+        }
+    }
+
+    func testDelegatesToCurrentControllerAndCanSwapAtRuntime() {
         let first = RecordingMediaSpy()
         let second = RecordingMediaSpy()
         let switchable = SwitchableRecordingMediaController(initialController: first)
 
         switchable.pauseMediaForRecording()
         switchable.resumeMediaAfterRecording()
-        #expect(first.pauseCallCount == 1)
-        #expect(first.resumeCallCount == 1)
-        #expect(second.pauseCallCount == 0)
-        #expect(second.resumeCallCount == 0)
+        XCTAssertEqual(first.pauseCallCount, 1)
+        XCTAssertEqual(first.resumeCallCount, 1)
+        XCTAssertEqual(second.pauseCallCount, 0)
+        XCTAssertEqual(second.resumeCallCount, 0)
 
         switchable.setController(second)
         switchable.pauseMediaForRecording()
         switchable.resumeMediaAfterRecording()
 
-        #expect(first.pauseCallCount == 1)
-        #expect(first.resumeCallCount == 1)
-        #expect(second.pauseCallCount == 1)
-        #expect(second.resumeCallCount == 1)
+        XCTAssertEqual(first.pauseCallCount, 1)
+        XCTAssertEqual(first.resumeCallCount, 1)
+        XCTAssertEqual(second.pauseCallCount, 1)
+        XCTAssertEqual(second.resumeCallCount, 1)
     }
 }

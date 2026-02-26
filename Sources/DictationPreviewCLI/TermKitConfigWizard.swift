@@ -31,6 +31,7 @@ private struct TermKitConfigState {
     let currentModel: String
     let currentPauseMediaWhileRecording: Bool
     let currentMicrophone: String?
+    let currentSmartRewriteThreshold: Int
     let apiKeyStored: Bool
     let apiKeySource: String
 }
@@ -41,12 +42,14 @@ private struct TermKitConfigStore {
     let defaultRewriteMode: String
     let defaultOpenRouterModel: String
     let defaultPauseMediaWhileRecording: Bool
+    let defaultSmartRewriteThreshold: Int
 
     private var shortcutPath: String { "\(configDir)/shortcut.txt" }
     private var rewriteModePath: String { "\(configDir)/rewrite_mode.txt" }
     private var modelPath: String { "\(configDir)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDir)/pause_media_while_recording.txt" }
     private var microphonePath: String { "\(configDir)/microphone.txt" }
+    private var smartRewriteThresholdPath: String { "\(configDir)/smart_rewrite_threshold.txt" }
     private var apiKeyPath: String { "\(configDir)/openrouter_api_key.txt" }
 
     func load() -> TermKitConfigState {
@@ -57,6 +60,7 @@ private struct TermKitConfigStore {
         let model = readValue(path: modelPath) ?? defaultOpenRouterModel
         let pauseMediaWhileRecording = normalizeBoolean(readValue(path: pauseMediaPath)) ?? defaultPauseMediaWhileRecording
         let microphone = readValue(path: microphonePath)
+        let smartRewriteThreshold = normalizeInt(readValue(path: smartRewriteThresholdPath)) ?? defaultSmartRewriteThreshold
         let apiKeyStored = (readValue(path: apiKeyPath) ?? "").isEmpty == false
         let apiKeySource = apiKeyStored ? "file:\(apiKeyPath)" : "unset"
 
@@ -66,22 +70,24 @@ private struct TermKitConfigStore {
             currentModel: model,
             currentPauseMediaWhileRecording: pauseMediaWhileRecording,
             currentMicrophone: microphone,
+            currentSmartRewriteThreshold: smartRewriteThreshold,
             apiKeyStored: apiKeyStored,
             apiKeySource: apiKeySource
         )
     }
-
     func persist(
         shortcut: TermKitShortcutSelection,
         rewriteMode: String,
         openRouterModel: String?,
         pauseMediaWhileRecording: Bool,
         microphone: TermKitMicrophoneSelection,
+        smartRewriteThreshold: Int,
         apiKey: TermKitAPIKeySelection
     ) throws {
         try ensureConfigDir()
         try writeValue(path: rewriteModePath, value: rewriteMode)
         try writeValue(path: pauseMediaPath, value: pauseMediaWhileRecording ? "true" : "false")
+        try writeValue(path: smartRewriteThresholdPath, value: String(smartRewriteThreshold))
 
         if let openRouterModel {
             try writeValue(path: modelPath, value: openRouterModel)
@@ -166,6 +172,13 @@ private struct TermKitConfigStore {
             return nil
         }
     }
+
+    private func normalizeInt(_ raw: String?) -> Int? {
+        guard let raw else {
+            return nil
+        }
+        return Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 }
 
 private enum TermKitWizardError: Error {
@@ -220,12 +233,14 @@ private final class TermKitConfigWizardApp {
     private var rewriteMode: String
     private var selectedModel: String
     private var pauseMediaWhileRecording: Bool
+    private var smartRewriteThreshold: Int
 
     private let rewriteModeValueLabel = Label("")
     private let modelValueLabel = Label("")
     private let hotkeyValueLabel = Label("")
     private let microphoneValueLabel = Label("")
     private let pauseMediaValueLabel = Label("")
+    private let smartRewriteThresholdValueLabel = Label("")
     private let apiKeySourceLabel = Label("")
     private let apiKeyField = TextField("")
     private let clearAPIKeyCheckbox = Checkbox("Clear stored API key")
@@ -242,6 +257,7 @@ private final class TermKitConfigWizardApp {
         self.rewriteMode = initialState.currentRewriteMode
         self.selectedModel = initialState.currentModel
         self.pauseMediaWhileRecording = initialState.currentPauseMediaWhileRecording
+        self.smartRewriteThreshold = initialState.currentSmartRewriteThreshold
     }
 
     func run() -> Never {
@@ -356,28 +372,52 @@ private final class TermKitConfigWizardApp {
             self.choosePauseMediaMode()
         }
 
+        let smartRewriteThresholdTitle = Label("Smart rewrite threshold:")
+        smartRewriteThresholdTitle.x = Pos.at(2)
+        smartRewriteThresholdTitle.y = Pos.at(21)
+
+        smartRewriteThresholdValueLabel.x = Pos.at(32)
+        smartRewriteThresholdValueLabel.y = Pos.top(of: smartRewriteThresholdTitle)
+        smartRewriteThresholdValueLabel.width = Dim.sized(34)
+
+        let smartRewriteThresholdButton = Button("_Choose")
+        smartRewriteThresholdButton.colorScheme = theme.actionButton
+        smartRewriteThresholdButton.x = Pos.right(of: smartRewriteThresholdValueLabel) + 1
+        smartRewriteThresholdButton.y = Pos.top(of: smartRewriteThresholdTitle)
+        smartRewriteThresholdButton.clicked = { _ in
+            self.chooseSmartRewriteThreshold()
+        }
+
         let apiKeyTitle = Label("OpenRouter API key (leave blank to keep current):")
         apiKeyTitle.x = Pos.at(2)
-        apiKeyTitle.y = Pos.at(21)
+        apiKeyTitle.y = Pos.at(23)
 
         apiKeySourceLabel.x = Pos.at(2)
-        apiKeySourceLabel.y = Pos.at(22)
+        apiKeySourceLabel.y = Pos.at(24)
 
         apiKeyField.x = Pos.at(2)
-        apiKeyField.y = Pos.at(23)
-        apiKeyField.width = Dim.sized(72)
+        apiKeyField.y = Pos.at(25)
+        apiKeyField.width = Dim.sized(61)
         apiKeyField.secret = true
         apiKeyField.colorScheme = theme.textInput
 
+        let testAPIKeyButton = Button("_Test")
+        testAPIKeyButton.colorScheme = theme.actionButton
+        testAPIKeyButton.x = Pos.right(of: apiKeyField) + 1
+        testAPIKeyButton.y = Pos.top(of: apiKeyField)
+        testAPIKeyButton.clicked = { _ in
+            self.testAPIKey()
+        }
+
         clearAPIKeyCheckbox.x = Pos.at(2)
-        clearAPIKeyCheckbox.y = Pos.at(24)
+        clearAPIKeyCheckbox.y = Pos.at(26)
         clearAPIKeyCheckbox.colorScheme = theme.actionButton
 
         let saveButton = Button("_Save")
         saveButton.isDefault = true
         saveButton.colorScheme = theme.actionButton
         saveButton.x = Pos.at(2)
-        saveButton.y = Pos.at(25)
+        saveButton.y = Pos.at(28)
         saveButton.clicked = { _ in
             self.saveAndExit()
         }
@@ -409,9 +449,13 @@ private final class TermKitConfigWizardApp {
             pauseMediaTitle,
             pauseMediaValueLabel,
             pauseMediaButton,
+            smartRewriteThresholdTitle,
+            smartRewriteThresholdValueLabel,
+            smartRewriteThresholdButton,
             apiKeyTitle,
             apiKeySourceLabel,
             apiKeyField,
+            testAPIKeyButton,
             clearAPIKeyCheckbox,
             saveButton,
             cancelButton,
@@ -422,6 +466,43 @@ private final class TermKitConfigWizardApp {
         Application.top.addSubview(window)
         Application.run()
         fatalError("unreachable")
+    }
+
+    private func testAPIKey() {
+        let typedToken = apiKeyField.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !typedToken.isEmpty else {
+            MessageBox.error("API Key Empty", message: "Please enter an API key to test.", buttons: ["Ok"])
+            return
+        }
+
+        let url = URL(string: "https://openrouter.ai/api/v1/models")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(typedToken)", forHTTPHeaderField: "Authorization")
+
+        let session = URLSession.shared
+        let task = session.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    MessageBox.error("Network Error", message: "Failed to connect: \(error.localizedDescription)", buttons: ["Ok"])
+                    return
+                }
+
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        MessageBox.info("Success", message: "API Key is valid.")
+                    } else if httpResponse.statusCode == 401 {
+                        MessageBox.error("Authentication Error", message: "API Key is invalid (401 Unauthorized). Please check your key and try again.", buttons: ["Ok"])
+                    } else {
+                        MessageBox.error("Error", message: "Received HTTP status \(httpResponse.statusCode).", buttons: ["Ok"])
+                    }
+                } else {
+                    MessageBox.error("Error", message: "Did not receive a valid HTTP response.", buttons: ["Ok"])
+                }
+            }
+        }
+        task.resume()
     }
 
     private func chooseRewriteMode() {
@@ -531,6 +612,48 @@ private final class TermKitConfigWizardApp {
         }
     }
 
+    private func chooseSmartRewriteThreshold() {
+        let options = CLIConfigOptionCatalog.smartRewriteThresholdChoices(current: smartRewriteThreshold)
+        let currentIndex = options.firstIndex(of: "Current (\(smartRewriteThreshold))") ?? 0
+
+        presentSelectionDialog(
+            title: "Smart Rewrite Threshold",
+            options: options,
+            selectedIndex: currentIndex
+        ) { index in
+            let selected = options[index]
+            if selected == CLIConfigOptionCatalog.customEntryLabel {
+                return { self.promptCustomSmartRewriteThreshold() }
+            }
+            if selected.hasPrefix("Current (") {
+                self.refreshLabels()
+                return nil
+            }
+
+            let valueString = selected.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            if let value = Int(valueString) {
+                self.smartRewriteThreshold = value
+            }
+
+            self.refreshLabels()
+            return nil
+        }
+    }
+
+    private func promptCustomSmartRewriteThreshold() {
+        presentTextEntryDialog(
+            title: "Custom Smart Rewrite Threshold",
+            message: "Enter an integer value.",
+            initialValue: String(smartRewriteThreshold),
+            secret: false
+        ) { value in
+            if let intValue = Int(value) {
+                self.smartRewriteThreshold = intValue
+            }
+            self.refreshLabels()
+        }
+    }
+
     private func chooseMicrophone() {
         let availableDevices = (try? AudioCapture.availableInputDevices()) ?? []
         var options: [String] = [
@@ -589,8 +712,10 @@ private final class TermKitConfigWizardApp {
         rewriteModeValueLabel.text = rewriteMode
         if rewriteMode == "smart" {
             modelValueLabel.text = selectedModel
+            smartRewriteThresholdValueLabel.text = String(smartRewriteThreshold)
         } else {
             modelValueLabel.text = "(unused in literal mode) \(selectedModel)"
+            smartRewriteThresholdValueLabel.text = "(unused in literal mode) \(smartRewriteThreshold)"
         }
 
         switch shortcutSelection {
@@ -636,6 +761,7 @@ private final class TermKitConfigWizardApp {
                 openRouterModel: rewriteMode == "smart" ? selectedModel : nil,
                 pauseMediaWhileRecording: pauseMediaWhileRecording,
                 microphone: microphoneSelection,
+                smartRewriteThreshold: smartRewriteThreshold,
                 apiKey: apiKeyAction
             )
             Application.shutdown(statusCode: 0)
@@ -647,7 +773,6 @@ private final class TermKitConfigWizardApp {
             )
         }
     }
-
     private func cancelAndExit() {
         fputs("config update cancelled\n", stderr)
         Application.shutdown(statusCode: 1)
@@ -763,7 +888,8 @@ enum TermKitConfigWizard {
         defaultShortcut: String,
         defaultRewriteMode: String,
         defaultOpenRouterModel: String,
-        defaultPauseMediaWhileRecording: Bool
+        defaultPauseMediaWhileRecording: Bool,
+        defaultSmartRewriteThreshold: Int
     ) -> Never {
         guard isatty(STDIN_FILENO) == 1 && isatty(STDOUT_FILENO) == 1 else {
             fputs("interactive config requires a TTY.\n", stderr)
@@ -775,7 +901,8 @@ enum TermKitConfigWizard {
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
             defaultOpenRouterModel: defaultOpenRouterModel,
-            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
+            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording,
+            defaultSmartRewriteThreshold: defaultSmartRewriteThreshold
         )
 
         TermKitConfigWizardApp(store: store).run()

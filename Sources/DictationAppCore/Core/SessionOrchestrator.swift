@@ -3,7 +3,6 @@ import Foundation
 public final class SessionOrchestrator {
     public typealias NowProvider = () -> Date
     private static let minimumSmartRewriteDurationMilliseconds = 350
-    private static let minimumSmartRewriteNeedScore = 3
     private static let longTranscriptCharacterThreshold = 220
     private static let longTranscriptTokenThreshold = 36
     private static let runOnCandidateTokenThreshold = 24
@@ -20,6 +19,7 @@ public final class SessionOrchestrator {
     private let feedback: FeedbackPresenting
     private let recordingMediaController: RecordingMediaControlling
     private let transcriptHistory: TranscriptHistoryWriting
+    private let settingsStore: SettingsStoring
     private let logger: Logging
     private let now: NowProvider
     private var shortcutPressTimestamp: Date?
@@ -51,6 +51,7 @@ public final class SessionOrchestrator {
         feedback: FeedbackPresenting = NoopFeedbackPresenter(),
         recordingMediaController: RecordingMediaControlling = NoopRecordingMediaController(),
         transcriptHistory: TranscriptHistoryWriting = NoopTranscriptHistoryWriter(),
+        settingsStore: SettingsStoring = InMemorySettingsStore(),
         logger: Logging,
         now: @escaping NowProvider = Date.init,
         stateMachine: StateMachine = .init()
@@ -66,6 +67,7 @@ public final class SessionOrchestrator {
         self.feedback = feedback
         self.recordingMediaController = recordingMediaController
         self.transcriptHistory = transcriptHistory
+        self.settingsStore = settingsStore
         self.logger = logger
         self.now = now
         self.stateMachine = stateMachine
@@ -376,19 +378,20 @@ public final class SessionOrchestrator {
             return false
         }
 
+        let threshold = settingsStore.load().smartRewriteThreshold
         let need = smartRewriteNeed(text: text)
         let reasonText = need.reasons.isEmpty ? "none" : need.reasons.joined(separator: ",")
         logger.log(
-            "smart_rewrite_need score=\(need.score) threshold=\(Self.minimumSmartRewriteNeedScore) reasons=\(reasonText)"
+            "smart_rewrite_need score=\(need.score) threshold=\(threshold) reasons=\(reasonText)"
         )
 
-        guard need.score < Self.minimumSmartRewriteNeedScore else {
+        guard need.score < threshold else {
             return false
         }
 
         logger.log(
             "smart_rewrite_skipped reason=low_need score=\(need.score)" +
-                " threshold=\(Self.minimumSmartRewriteNeedScore) reasons=\(reasonText)"
+                " threshold=\(threshold) reasons=\(reasonText)"
         )
         return true
     }

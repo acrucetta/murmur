@@ -13,23 +13,25 @@ OPENROUTER_MODEL_FILE="$CONFIG_DIR/openrouter_model.txt"
 OPENROUTER_API_KEY_FILE="$CONFIG_DIR/openrouter_api_key.txt"
 PAUSE_MEDIA_FILE="$CONFIG_DIR/pause_media_while_recording.txt"
 MICROPHONE_FILE="$CONFIG_DIR/microphone.txt"
+SMART_REWRITE_THRESHOLD_FILE="$CONFIG_DIR/smart_rewrite_threshold.txt"
 DEFAULT_SHORTCUT="ctrl+shift+space"
 DEFAULT_REWRITE_MODE="literal"
 DEFAULT_OPENROUTER_MODEL="mistralai/mistral-small-3.1-24b-instruct"
 DEFAULT_PAUSE_MEDIA_WHILE_RECORDING="false"
+DEFAULT_SMART_REWRITE_THRESHOLD="3"
 COMMAND_NAME="${0##*/}"
 
 usage() {
   cat <<USAGE
 Usage:
   ${COMMAND_NAME} install [--python <python3>] [--skip-model-download] [--link-only]
-  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
-  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>]
+  ${COMMAND_NAME} run [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>] [--smart-rewrite-threshold <value>]
+  ${COMMAND_NAME} start [--model <id>] [--rewrite-mode <literal|smart>] [--openrouter-model <id>] [--pause-media-while-recording <true|false>] [--microphone <name-or-uid>] [--smart-rewrite-threshold <value>]
   ${COMMAND_NAME} stop
   ${COMMAND_NAME} logs
   ${COMMAND_NAME} microphones
   ${COMMAND_NAME} config
-  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key]
+  ${COMMAND_NAME} config set [--shortcut <combo>] [--reset-shortcut] [--mode literal|smart] [--model <id>] [--pause-media <true|false>] [--microphone <name-or-uid>] [--reset-microphone] [--api-key <token>] [--clear-api-key] [--smart-rewrite-threshold <value>]
   ${COMMAND_NAME} doctor
   ${COMMAND_NAME} uninstall
 
@@ -314,6 +316,39 @@ openrouter_model_source() {
   printf '%s\n' "default"
 }
 
+resolve_smart_rewrite_threshold() {
+  local value
+  local env_value="${MURMUR_SMART_REWRITE_THRESHOLD:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return
+  fi
+
+  local file_value
+  file_value="$(read_file_value "$SMART_REWRITE_THRESHOLD_FILE" || true)"
+  if [[ -n "$file_value" ]]; then
+    printf '%s\n' "$file_value"
+    return
+  fi
+
+  printf '%s\n' "$DEFAULT_SMART_REWRITE_THRESHOLD"
+}
+
+smart_rewrite_threshold_source() {
+  local env_value="${MURMUR_SMART_REWRITE_THRESHOLD:-}"
+  env_value="$(trim "$env_value")"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "env:MURMUR_SMART_REWRITE_THRESHOLD"
+    return
+  fi
+  if [[ -f "$SMART_REWRITE_THRESHOLD_FILE" ]]; then
+    printf '%s\n' "file:$SMART_REWRITE_THRESHOLD_FILE"
+    return
+  fi
+  printf '%s\n' "default"
+}
+
 resolve_openrouter_api_key() {
   local env_key="${MURMUR_OPENROUTER_API_KEY:-}"
   env_key="$(trim "$env_key")"
@@ -437,6 +472,7 @@ examples:
   ${COMMAND_NAME} config set --reset-microphone
   ${COMMAND_NAME} config set --api-key sk-or-...
   ${COMMAND_NAME} config set --clear-api-key
+  ${COMMAND_NAME} config set --smart-rewrite-threshold 0
 USAGE
 }
 
@@ -457,6 +493,8 @@ config_get() {
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"
   echo "openrouter_api_key_source=$(openrouter_api_key_source)"
+  echo "smart_rewrite_threshold=$(resolve_smart_rewrite_threshold)"
+  echo "smart_rewrite_threshold_source=$(smart_rewrite_threshold_source)"
 }
 
 run_swift_config_wizard() {
@@ -470,7 +508,8 @@ run_swift_config_wizard() {
     --default-shortcut "$DEFAULT_SHORTCUT" \
     --default-rewrite-mode "$DEFAULT_REWRITE_MODE" \
     --default-openrouter-model "$DEFAULT_OPENROUTER_MODEL" \
-    --default-pause-media-while-recording "$DEFAULT_PAUSE_MEDIA_WHILE_RECORDING"
+    --default-pause-media-while-recording "$DEFAULT_PAUSE_MEDIA_WHILE_RECORDING" \
+    --default-smart-rewrite-threshold "$DEFAULT_SMART_REWRITE_THRESHOLD"
 }
 
 config_set_interactive() {
@@ -488,7 +527,7 @@ config_set_interactive() {
 }
 
 config_set_non_interactive() {
-  local mode="" model="" pause_media="" api_key="" shortcut="" microphone="" clear_api_key=0 reset_shortcut=0 reset_microphone=0
+  local mode="" model="" pause_media="" api_key="" shortcut="" microphone="" smart_rewrite_threshold="" clear_api_key=0 reset_shortcut=0 reset_microphone=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -540,6 +579,14 @@ config_set_non_interactive() {
         microphone="$2"
         shift 2
         ;;
+      --smart-rewrite-threshold)
+        if [[ $# -lt 2 ]]; then
+          echo "--smart-rewrite-threshold requires a value" >&2
+          return 2
+        fi
+        smart_rewrite_threshold="$2"
+        shift 2
+        ;;
       --reset-shortcut)
         reset_shortcut=1
         shift
@@ -574,7 +621,7 @@ config_set_non_interactive() {
     return 2
   fi
 
-  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && -z "$microphone" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 && "$reset_microphone" -eq 0 ]]; then
+  if [[ -z "$mode" && -z "$model" && -z "$pause_media" && -z "$api_key" && -z "$shortcut" && -z "$microphone" && -z "$smart_rewrite_threshold" && "$clear_api_key" -eq 0 && "$reset_shortcut" -eq 0 && "$reset_microphone" -eq 0 ]]; then
     config_set_interactive
     return $?
   fi
@@ -614,6 +661,11 @@ config_set_non_interactive() {
   microphone="$(trim "$microphone")"
   if [[ -n "$microphone" ]]; then
     write_microphone_value "$microphone"
+  fi
+
+  smart_rewrite_threshold="$(trim "$smart_rewrite_threshold")"
+  if [[ -n "$smart_rewrite_threshold" ]]; then
+    write_config_value "$SMART_REWRITE_THRESHOLD_FILE" "$smart_rewrite_threshold"
   fi
 
   if [[ "$reset_shortcut" -eq 1 ]]; then
@@ -712,7 +764,7 @@ start_bg() {
     return 0
   fi
 
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier smart_rewrite_threshold_identifier
   local microphone_args=()
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
@@ -722,6 +774,7 @@ start_bg() {
   microphone_identifier="$(resolve_microphone || true)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
+  smart_rewrite_threshold_identifier="$(resolve_smart_rewrite_threshold)"
   if [[ -n "$microphone_identifier" ]]; then
     microphone_args=(--microphone "$microphone_identifier")
   fi
@@ -737,6 +790,7 @@ start_bg() {
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
+        --smart-rewrite-threshold "$smart_rewrite_threshold_identifier" \
         "${microphone_args[@]}" \
         "$@" >"$LOG_FILE" 2>&1 &
     else
@@ -747,6 +801,7 @@ start_bg() {
         --rewrite-mode "$rewrite_mode" \
         --pause-media-while-recording "$pause_media_while_recording" \
         --openrouter-model "$openrouter_model" \
+        --smart-rewrite-threshold "$smart_rewrite_threshold_identifier" \
         "${microphone_args[@]}" \
         "$@" >"$LOG_FILE" 2>&1 &
     fi
@@ -764,7 +819,7 @@ start_bg() {
 }
 
 run_fg() {
-  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier
+  local python_bin script_path shortcut_identifier rewrite_mode openrouter_model openrouter_api_key pause_media_while_recording microphone_identifier smart_rewrite_threshold_identifier
   local microphone_args=()
   python_bin="$(resolve_python)"
   script_path="$(resolve_script)"
@@ -774,6 +829,7 @@ run_fg() {
   microphone_identifier="$(resolve_microphone || true)"
   openrouter_model="$(resolve_openrouter_model)"
   openrouter_api_key="$(resolve_openrouter_api_key || true)"
+  smart_rewrite_threshold_identifier="$(resolve_smart_rewrite_threshold)"
   if [[ -n "$microphone_identifier" ]]; then
     microphone_args=(--microphone "$microphone_identifier")
   fi
@@ -788,6 +844,7 @@ run_fg() {
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
+      --smart-rewrite-threshold "$smart_rewrite_threshold_identifier" \
       "${microphone_args[@]}" \
       "$@"
   else
@@ -798,6 +855,7 @@ run_fg() {
       --rewrite-mode "$rewrite_mode" \
       --pause-media-while-recording "$pause_media_while_recording" \
       --openrouter-model "$openrouter_model" \
+      --smart-rewrite-threshold "$smart_rewrite_threshold_identifier" \
       "${microphone_args[@]}" \
       "$@"
   fi
@@ -839,6 +897,8 @@ doctor() {
   echo "openrouter_model_source=$(openrouter_model_source)"
   echo "openrouter_api_key_present=$(openrouter_key_present)"
   echo "openrouter_api_key_source=$(openrouter_api_key_source)"
+  echo "smart_rewrite_threshold=$(resolve_smart_rewrite_threshold)"
+  echo "smart_rewrite_threshold_source=$(smart_rewrite_threshold_source)"
   echo "history_dir=$TRANSCRIPT_DIR"
   echo "completion_history_file=$TRANSCRIPT_DIR/completions.log"
   if is_running; then

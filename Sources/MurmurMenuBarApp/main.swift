@@ -37,6 +37,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.microphoneWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.smartRewriteThresholdWarning {
+            emit("warning=\(warning)")
+        }
         let menuBarController = MenuBarController()
         let runtime = MenuBarRuntime(
             menuBarController: menuBarController,
@@ -52,7 +55,8 @@ struct MurmurMenuBarApp {
             openRouterRequestTimeoutSeconds: arguments.openRouterRequestTimeoutSeconds,
             pauseMediaWhileRecording: arguments.pauseMediaWhileRecording,
             toggleMode: arguments.toggleMode,
-            preferredMicrophone: arguments.preferredMicrophone
+            preferredMicrophone: arguments.preferredMicrophone,
+            smartRewriteThreshold: arguments.smartRewriteThreshold
         )
 
         let delegate = AppDelegate(
@@ -93,6 +97,8 @@ private struct Arguments {
     let toggleModeWarning: String?
     let preferredMicrophone: String?
     let microphoneWarning: String?
+    let smartRewriteThreshold: Int
+    let smartRewriteThresholdWarning: String?
 
     static func parse(_ rawArgs: [String]) -> Arguments {
         let currentDirectory = FileManager.default.currentDirectoryPath
@@ -120,6 +126,10 @@ private struct Arguments {
         )
         let microphoneResolution = resolvePreferredMicrophone(
             explicit: value(after: "--microphone", in: rawArgs),
+            environment: environment
+        )
+        let smartRewriteThresholdResolution = resolveSmartRewriteThreshold(
+            explicit: value(after: "--smart-rewrite-threshold", in: rawArgs),
             environment: environment
         )
 
@@ -151,7 +161,9 @@ private struct Arguments {
             toggleMode: toggleModeResolution.enabled,
             toggleModeWarning: toggleModeResolution.warning,
             preferredMicrophone: microphoneResolution.microphone,
-            microphoneWarning: microphoneResolution.warning
+            microphoneWarning: microphoneResolution.warning,
+            smartRewriteThreshold: smartRewriteThresholdResolution.threshold,
+            smartRewriteThresholdWarning: smartRewriteThresholdResolution.warning
         )
     }
 
@@ -373,6 +385,35 @@ private struct Arguments {
         return (nil, nil)
     }
 
+    private static func resolveSmartRewriteThreshold(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (threshold: Int, warning: String?) {
+        if let explicit {
+            guard let parsed = parsePositiveInt(explicit) else {
+                return (
+                    3,
+                    "invalid smart-rewrite-threshold value '\(explicit)'; expected positive integer"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        if let envValue = environment["MURMUR_SMART_REWRITE_THRESHOLD"],
+           !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard let parsed = parsePositiveInt(envValue) else {
+                return (
+                    3,
+                    "invalid MURMUR_SMART_REWRITE_THRESHOLD '\(envValue)'; expected positive integer"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        return (3, nil)
+    }
+
     private static func parseBool(_ rawValue: String) -> Bool? {
         let normalized = rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -386,6 +427,14 @@ private struct Arguments {
         default:
             return nil
         }
+    }
+
+    private static func parsePositiveInt(_ rawValue: String) -> Int? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Int(trimmed), parsed >= 0 else {
+            return nil
+        }
+        return parsed
     }
 
     private static func resolveConfigDirectory(environment: [String: String]) -> String {
@@ -410,6 +459,7 @@ private struct MenuBarConfigSnapshot {
     var toggleMode: Bool
     var preferredMicrophone: String?
     var availableMicrophones: [AudioInputDevice]
+    var smartRewriteThreshold: Int
 
     var menuSnapshot: MenuBarSettingsSnapshot {
         .init(
@@ -419,7 +469,8 @@ private struct MenuBarConfigSnapshot {
             pauseMediaWhileRecording: pauseMediaWhileRecording,
             toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
-            availableMicrophones: availableMicrophones
+            availableMicrophones: availableMicrophones,
+            smartRewriteThreshold: smartRewriteThreshold
         )
     }
 }
@@ -433,6 +484,7 @@ private struct MurmurConfigStore {
     private var pauseMediaPath: String { "\(configDirectory)/pause_media_while_recording.txt" }
     private var toggleModePath: String { "\(configDirectory)/toggle_mode.txt" }
     private var microphonePath: String { "\(configDirectory)/microphone.txt" }
+    private var smartRewriteThresholdPath: String { "\(configDirectory)/smart_rewrite_threshold.txt" }
 
     init(configDirectory: String, fileManager: FileManager = .default) {
         self.configDirectory = configDirectory
@@ -471,6 +523,10 @@ private struct MurmurConfigStore {
         } else {
             try writeValue(trimmed, to: microphonePath)
         }
+    }
+
+    func persistSmartRewriteThreshold(_ threshold: Int) throws {
+        try writeValue(String(threshold), to: smartRewriteThresholdPath)
     }
 
     private func ensureConfigDirectory() throws {
@@ -514,6 +570,7 @@ private final class MenuBarRuntime {
     private let configStore: MurmurConfigStore
     private let recordingMediaController: SwitchableRecordingMediaController
     private var menuConfigSnapshot: MenuBarConfigSnapshot
+    private let settingsStore: SettingsStoring
 
     init(
         menuBarController: MenuBarController,
@@ -529,28 +586,36 @@ private final class MenuBarRuntime {
         openRouterRequestTimeoutSeconds: TimeInterval,
         pauseMediaWhileRecording: Bool,
         toggleMode: Bool,
-        preferredMicrophone: String?
+        preferredMicrophone: String?,
+        smartRewriteThreshold: Int
     ) {
         self.menuBarController = menuBarController
         self.overlayPreviewState = overlayPreviewState
 
         let primaryShortcut = hotkeyShortcuts.first ?? .defaultPushToTalk
+        self.primaryShortcut = primaryShortcut
         let overlayController = RecordingOverlayController(
             promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: toggleMode),
             previewState: overlayPreviewState
         )
+        self.overlayController = overlayController
         let statusUI = MenuBarStatusUI(
             menuBarController: menuBarController,
             overlayController: overlayController
         )
+        self.statusUI = statusUI
         let logger = MenuBarLogger()
+        self.logger = logger
         let configStore = MurmurConfigStore(configDirectory: configDirectory)
+        self.configStore = configStore
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
+        self.audioCapture = audioCapture
         let transcriptHistory = FileTranscriptHistoryStore()
         let asrEngine = MoonshineProcessASREngine(
             command: [pythonBinary, scriptPath],
             model: model
         )
+        self.asrEngine = asrEngine
         let contextProvider = AppRewriteContextProvider(mode: rewriteMode)
         let transcriptRewriter: TranscriptRewriting
         if rewriteMode == .smart,
@@ -589,6 +654,7 @@ private final class MenuBarRuntime {
         let recordingMediaController = SwitchableRecordingMediaController(
             initialController: initialRecordingMediaController
         )
+        self.recordingMediaController = recordingMediaController
         logger.log("toggle_mode enabled=\(toggleMode)")
         if let preferredMicrophone {
             logger.log("microphone_selected value=\"\(escapeLogValue(preferredMicrophone))\"")
@@ -611,8 +677,20 @@ private final class MenuBarRuntime {
             pauseMediaWhileRecording: pauseMediaWhileRecording,
             toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
-            availableMicrophones: availableMicrophones
+            availableMicrophones: availableMicrophones,
+            smartRewriteThreshold: smartRewriteThreshold
         )
+        self.menuConfigSnapshot = initialMenuConfigSnapshot
+
+        let settingsStore = InMemorySettingsStore(
+            initial: .init(
+                shortcutIdentifier: primaryShortcut.identifier,
+                preferredModelSize: model,
+                showHUD: true,
+                smartRewriteThreshold: smartRewriteThreshold
+            )
+        )
+        self.settingsStore = settingsStore
 
         let orchestrator = SessionOrchestrator(
             permissionManager: PermissionManager(initialSnapshot: .allGranted),
@@ -626,14 +704,18 @@ private final class MenuBarRuntime {
             feedback: feedback,
             recordingMediaController: recordingMediaController,
             transcriptHistory: transcriptHistory,
+            settingsStore: settingsStore,
             logger: logger
         )
+        self.orchestrator = orchestrator
         let hotkeyController = HotkeyController(shortcuts: hotkeyShortcuts)
+        self.hotkeyController = hotkeyController
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
             sessionEventHandler: orchestrator,
             toggleMode: toggleMode
         )
+        self.bridge = bridge
 
         overlayController.onStopRequested = { [weak orchestrator, weak bridge] in
             bridge?.resetToggleState()
@@ -649,19 +731,6 @@ private final class MenuBarRuntime {
             // ensuring consistent behavior.
             orchestrator?.handle(.shortcutPressed(.init(timestamp: Date())))
         }
-
-        self.statusUI = statusUI
-        self.logger = logger
-        self.audioCapture = audioCapture
-        self.asrEngine = asrEngine
-        self.orchestrator = orchestrator
-        self.hotkeyController = hotkeyController
-        self.bridge = bridge
-        self.overlayController = overlayController
-        self.primaryShortcut = primaryShortcut
-        self.configStore = configStore
-        self.recordingMediaController = recordingMediaController
-        menuConfigSnapshot = initialMenuConfigSnapshot
 
         statusUI.onError = { error in
             guard error == .engineError else {
@@ -775,6 +844,14 @@ private final class MenuBarRuntime {
                 } else {
                     logger.log("menu_settings_updated key=microphone value=\"system_default\"")
                 }
+            case .setSmartRewriteThreshold(let threshold):
+                try configStore.persistSmartRewriteThreshold(threshold)
+                menuConfigSnapshot.smartRewriteThreshold = threshold
+                var currentSettings = settingsStore.load()
+                currentSettings.smartRewriteThreshold = threshold
+                settingsStore.save(currentSettings)
+                logger.log("menu_settings_updated key=smart_rewrite_threshold value=\(threshold)")
+                logger.log("in_memory_settings_store_after_save value=\(settingsStore.load().smartRewriteThreshold)")
             }
 
             menuBarController.setSettings(menuConfigSnapshot.menuSnapshot)

@@ -9,6 +9,7 @@ public struct MenuBarSettingsSnapshot {
     public let toggleMode: Bool
     public let preferredMicrophone: String?
     public let availableMicrophones: [AudioInputDevice]
+    public let smartRewriteThreshold: Int
 
     public init(
         shortcutIdentifier: String,
@@ -17,7 +18,8 @@ public struct MenuBarSettingsSnapshot {
         pauseMediaWhileRecording: Bool,
         toggleMode: Bool,
         preferredMicrophone: String?,
-        availableMicrophones: [AudioInputDevice]
+        availableMicrophones: [AudioInputDevice],
+        smartRewriteThreshold: Int
     ) {
         self.shortcutIdentifier = shortcutIdentifier
         self.rewriteMode = rewriteMode
@@ -26,6 +28,7 @@ public struct MenuBarSettingsSnapshot {
         self.toggleMode = toggleMode
         self.preferredMicrophone = preferredMicrophone
         self.availableMicrophones = availableMicrophones
+        self.smartRewriteThreshold = smartRewriteThreshold
     }
 }
 
@@ -35,6 +38,7 @@ public enum MenuBarSettingsAction {
     case setPauseMediaWhileRecording(Bool)
     case setToggleMode(Bool)
     case setPreferredMicrophone(String?)
+    case setSmartRewriteThreshold(Int)
 }
 
 @MainActor
@@ -47,6 +51,7 @@ public final class MenuBarController: NSObject {
     private var pauseMediaItem: NSMenuItem?
     private var toggleModeItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
+    private var smartRewriteThresholdItem: NSMenuItem?
     private var settingsSnapshot: MenuBarSettingsSnapshot?
 
     public var onSettingsAction: ((MenuBarSettingsAction) -> Void)?
@@ -144,6 +149,10 @@ public final class MenuBarController: NSObject {
         menu.addItem(modelItem)
         self.modelItem = modelItem
 
+        let smartRewriteThresholdItem = NSMenuItem(title: "Smart Rewrite Threshold: -", action: nil, keyEquivalent: "")
+        menu.addItem(smartRewriteThresholdItem)
+        self.smartRewriteThresholdItem = smartRewriteThresholdItem
+
         let pauseMediaItem = NSMenuItem(
             title: "Pause Media While Recording",
             action: #selector(togglePauseMedia(_:)),
@@ -180,6 +189,7 @@ public final class MenuBarController: NSObject {
             shortcutItem?.title = "Shortcut: -"
             rewriteModeItem?.title = "Rewrite Mode: -"
             modelItem?.title = "Smart Model: -"
+            smartRewriteThresholdItem?.title = "Smart Rewrite Threshold: -"
             pauseMediaItem?.state = .off
             pauseMediaItem?.isEnabled = false
             toggleModeItem?.state = .off
@@ -193,6 +203,8 @@ public final class MenuBarController: NSObject {
         rewriteModeItem?.submenu = makeRewriteModeSubmenu(snapshot: snapshot)
         modelItem?.title = "Smart Model: \(snapshot.openRouterModel)"
         modelItem?.submenu = makeModelSubmenu(snapshot: snapshot)
+        smartRewriteThresholdItem?.title = "Smart Rewrite Threshold: \(snapshot.smartRewriteThreshold)"
+        smartRewriteThresholdItem?.submenu = makeSmartRewriteThresholdSubmenu(snapshot: snapshot)
         pauseMediaItem?.state = snapshot.pauseMediaWhileRecording ? .on : .off
         pauseMediaItem?.isEnabled = true
         toggleModeItem?.state = snapshot.toggleMode ? .on : .off
@@ -228,6 +240,35 @@ public final class MenuBarController: NSObject {
             item.target = self
             item.representedObject = choice
             item.state = choice == snapshot.openRouterModel ? .on : .off
+            submenu.addItem(item)
+        }
+
+        return submenu
+    }
+
+    private func makeSmartRewriteThresholdSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
+        let submenu = NSMenu(title: "Smart Rewrite Threshold")
+        let choices = CLIConfigOptionCatalog.smartRewriteThresholdChoices(current: snapshot.smartRewriteThreshold)
+
+        for choice in choices {
+            if choice == CLIConfigOptionCatalog.customEntryLabel {
+                submenu.addItem(NSMenuItem.separator())
+                let customItem = NSMenuItem(title: "Custom...", action: #selector(promptCustomSmartRewriteThreshold(_:)), keyEquivalent: "")
+                customItem.target = self
+                submenu.addItem(customItem)
+                continue
+            }
+
+            let item = NSMenuItem(title: choice, action: #selector(selectSmartRewriteThreshold(_:)), keyEquivalent: "")
+            item.target = self
+            let valueString = choice.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            if let value = Int(valueString) {
+                item.tag = value
+                item.state = value == snapshot.smartRewriteThreshold ? .on : .off
+            } else if choice.hasPrefix("Current") {
+                item.tag = snapshot.smartRewriteThreshold
+                item.state = .on
+            }
             submenu.addItem(item)
         }
 
@@ -323,6 +364,29 @@ public final class MenuBarController: NSObject {
             return
         }
         onSettingsAction?(.setOpenRouterModel(model))
+    }
+
+    @objc private func selectSmartRewriteThreshold(_ sender: NSMenuItem) {
+        onSettingsAction?(.setSmartRewriteThreshold(sender.tag))
+    }
+
+    @objc private func promptCustomSmartRewriteThreshold(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Custom Smart Rewrite Threshold"
+        alert.informativeText = "Enter an integer value."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        input.stringValue = String(settingsSnapshot?.smartRewriteThreshold ?? 3)
+        alert.accessoryView = input
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            if let value = Int(input.stringValue) {
+                onSettingsAction?(.setSmartRewriteThreshold(value))
+            }
+        }
     }
 
     @objc private func togglePauseMedia(_ sender: NSMenuItem) {
