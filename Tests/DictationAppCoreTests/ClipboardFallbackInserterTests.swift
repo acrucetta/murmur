@@ -1,10 +1,9 @@
 import AppKit
-import Testing
+import XCTest
 @testable import DictationAppCore
 
-struct ClipboardFallbackInserterTests {
-    @Test
-    func successfulPasteLeavesInsertedTextInClipboard() {
+final class ClipboardFallbackInserterTests: XCTestCase {
+    func testSuccessfulPasteLeavesInsertedTextInClipboard() {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("murmur-tests-\(UUID().uuidString)"))
         pasteboard.clearContents()
         _ = pasteboard.setString("original clipboard value", forType: .string)
@@ -17,9 +16,9 @@ struct ClipboardFallbackInserterTests {
 
         let result = inserter.paste("dictated text")
 
-        #expect(result.success == true)
-        #expect(result.method == .clipboardPaste)
-        #expect(pasteboard.string(forType: .string) == "dictated text")
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.method, .clipboardPaste)
+        XCTAssertEqual(pasteboard.string(forType: .string), "dictated text")
     }
 }
 

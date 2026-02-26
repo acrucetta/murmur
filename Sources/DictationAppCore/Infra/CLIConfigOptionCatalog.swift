@@ -37,6 +37,17 @@ public struct CLIConfigOptionCatalog {
         return orderedUnique(choices)
     }
 
+    public static func smartRewriteThresholdChoices(current: Int) -> [String] {
+        var choices: [String] = []
+        choices.append("Current (\(current))")
+        choices.append("Off (0)")
+        choices.append("Low (1)")
+        choices.append("Medium (3)")
+        choices.append("High (5)")
+        choices.append(customEntryLabel)
+        return orderedUnique(choices)
+    }
+
     private static func orderedUnique(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         var ordered: [String] = []

@@ -39,14 +39,16 @@ struct DictationPreviewCLI {
             let defaultShortcut,
             let defaultRewriteMode,
             let defaultOpenRouterModel,
-            let defaultPauseMediaWhileRecording
+            let defaultPauseMediaWhileRecording,
+            let defaultSmartRewriteThreshold
         ):
             runConfigWizard(
                 configDir: configDir,
                 defaultShortcut: defaultShortcut,
                 defaultRewriteMode: defaultRewriteMode,
                 defaultOpenRouterModel: defaultOpenRouterModel,
-                defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
+                defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording,
+                defaultSmartRewriteThreshold: defaultSmartRewriteThreshold
             )
         case .invalid:
             print(Arguments.usage)
@@ -338,19 +340,21 @@ struct DictationPreviewCLI {
 #endif
     }
 
-    private static func runConfigWizard(
+    static func runConfigWizard(
         configDir: String,
         defaultShortcut: String,
         defaultRewriteMode: String,
         defaultOpenRouterModel: String,
-        defaultPauseMediaWhileRecording: Bool
+        defaultPauseMediaWhileRecording: Bool,
+        defaultSmartRewriteThreshold: Int
     ) {
         TermKitConfigWizard.run(
             configDir: configDir,
             defaultShortcut: defaultShortcut,
             defaultRewriteMode: defaultRewriteMode,
             defaultOpenRouterModel: defaultOpenRouterModel,
-            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording
+            defaultPauseMediaWhileRecording: defaultPauseMediaWhileRecording,
+            defaultSmartRewriteThreshold: defaultSmartRewriteThreshold
         )
     }
 
@@ -385,7 +389,8 @@ private struct Arguments {
             defaultShortcut: String,
             defaultRewriteMode: String,
             defaultOpenRouterModel: String,
-            defaultPauseMediaWhileRecording: Bool
+            defaultPauseMediaWhileRecording: Bool,
+            defaultSmartRewriteThreshold: Int
         )
         case invalid
     }
@@ -398,7 +403,7 @@ private struct Arguments {
       swift run DictationPreviewCLI --hotkey-daemon [--model medium-streaming-en] [--shortcut ctrl+shift+space] [--moonshine-python python3] [--moonshine-script scripts/moonshine_transcribe.py] [--microphone "<name-or-uid>"]
       swift run DictationPreviewCLI --list-microphones
       swift run DictationPreviewCLI --capture-shortcut
-      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false]
+      swift run DictationPreviewCLI --config-wizard --config-dir "/path/to/config" [--default-shortcut ctrl+shift+space] [--default-rewrite-mode literal] [--default-openrouter-model mistralai/mistral-small-3.1-24b-instruct] [--default-pause-media-while-recording false] [--default-smart-rewrite-threshold 3]
     """
 
     let mode: Mode
@@ -492,13 +497,16 @@ private struct Arguments {
             let defaultOpenRouterModel = value(after: "--default-openrouter-model", in: rawArgs) ?? "mistralai/mistral-small-3.1-24b-instruct"
             let defaultPauseMediaRaw = value(after: "--default-pause-media-while-recording", in: rawArgs) ?? "false"
             let defaultPauseMedia = parseBool(defaultPauseMediaRaw) ?? false
+            let defaultSmartRewriteThresholdRaw = value(after: "--default-smart-rewrite-threshold", in: rawArgs) ?? "3"
+            let defaultSmartRewriteThreshold = parseInt(defaultSmartRewriteThresholdRaw) ?? 3
             return Arguments(
                 mode: .configWizard(
                     configDir: configDir,
                     defaultShortcut: defaultShortcut,
                     defaultRewriteMode: defaultRewriteMode,
                     defaultOpenRouterModel: defaultOpenRouterModel,
-                    defaultPauseMediaWhileRecording: defaultPauseMedia
+                    defaultPauseMediaWhileRecording: defaultPauseMedia,
+                    defaultSmartRewriteThreshold: defaultSmartRewriteThreshold
                 )
             )
         }
@@ -529,6 +537,10 @@ private struct Arguments {
         default:
             return nil
         }
+    }
+
+    private static func parseInt(_ rawValue: String) -> Int? {
+        Int(rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
