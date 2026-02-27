@@ -1,13 +1,16 @@
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from asr_model_catalog import ASRModelSpec
 from asr_model_setup import (
     ensure_mlx_assets,
+    ensure_moonshine_assets,
     is_apple_silicon,
     ensure_huggingface_assets,
     required_transformers_model_type,
@@ -41,6 +44,15 @@ class ASRModelSetupTests(unittest.TestCase):
             runtime_script="/repo/scripts/hf_asr_transcribe.py",
             setup_kind="mlx",
             setup_model_ref="mlx-community/Qwen3-ASR-1.7B-4bit",
+            trust_remote_code=False,
+        )
+        self.spec_moonshine = ASRModelSpec(
+            request="moonshine",
+            provider="moonshine",
+            runtime_model="medium-streaming-en",
+            runtime_script="/repo/scripts/moonshine_transcribe.py",
+            setup_kind="moonshine",
+            setup_model_ref="medium-streaming-en",
             trust_remote_code=False,
         )
 
@@ -111,6 +123,51 @@ class ASRModelSetupTests(unittest.TestCase):
             "/venv/bin/python3",
             ["mlx>=0.23", "mlx-audio>=0.2", "huggingface_hub>=0.24"],
         )
+
+    @patch("asr_model_setup.infer_moonshine_arch_and_language", return_value=("medium-streaming", "en"))
+    @patch("asr_model_setup.ensure_python_packages")
+    @patch("asr_model_setup.modules_available", return_value=True)
+    @patch("asr_model_setup.run_command")
+    def test_ensure_moonshine_assets_uses_module_api_download(
+        self,
+        run_command_mock,
+        _modules_available_mock,
+        ensure_python_packages_mock,
+        _infer_mock,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_info = {
+                "download_url": "https://models.example/moonshine/medium-streaming-en",
+                "model_arch": "medium-streaming",
+            }
+            find_model_info_mock = unittest.mock.Mock(return_value=model_info)
+            get_components_mock = unittest.mock.Mock(return_value=["encoder.onnx", "decoder.onnx"])
+            download_model_mock = unittest.mock.Mock(return_value=("/tmp/model", "medium-streaming"))
+
+            def import_module_side_effect(name: str):
+                if name == "moonshine_voice":
+                    return SimpleNamespace(string_to_model_arch=lambda arch: f"arch:{arch}")
+                if name == "moonshine_voice.download":
+                    return SimpleNamespace(
+                        find_model_info=find_model_info_mock,
+                        get_components_for_model_info=get_components_mock,
+                        download_model_from_info=download_model_mock,
+                    )
+                if name == "moonshine_voice.download_file":
+                    return SimpleNamespace(get_cache_dir=lambda: tmpdir)
+                raise AssertionError(f"unexpected module import: {name}")
+
+            with patch("asr_model_setup.importlib.import_module", side_effect=import_module_side_effect):
+                ensure_moonshine_assets(
+                    self.spec_moonshine,
+                    python_bin="/venv/bin/python3",
+                    skip_download=False,
+                )
+
+            ensure_python_packages_mock.assert_not_called()
+            find_model_info_mock.assert_called_once_with(language="en", model_arch="arch:medium-streaming")
+            download_model_mock.assert_called_once_with(model_info)
+            run_command_mock.assert_not_called()
 
 
 if __name__ == "__main__":

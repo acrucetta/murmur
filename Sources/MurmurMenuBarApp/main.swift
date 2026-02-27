@@ -395,6 +395,7 @@ private struct Arguments {
 private struct MenuBarConfigSnapshot {
     var shortcutIdentifier: String
     var rewriteMode: TranscriptRewriteMode
+    var asrModel: String
     var openRouterModel: String
     var pauseMediaWhileRecording: Bool
     var preferredMicrophone: String?
@@ -404,6 +405,7 @@ private struct MenuBarConfigSnapshot {
         .init(
             shortcutIdentifier: shortcutIdentifier,
             rewriteMode: rewriteMode,
+            asrModel: asrModel,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
             preferredMicrophone: preferredMicrophone,
@@ -429,6 +431,14 @@ private struct MurmurConfigStore {
 
     func persistRewriteMode(_ mode: TranscriptRewriteMode) throws {
         try writeValue(mode.rawValue, to: rewriteModePath)
+    }
+
+    func persistASRModel(_ model: String) throws {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        try writeValue(trimmed, to: asrModelPath)
     }
 
     func persistOpenRouterModel(_ model: String) throws {
@@ -611,6 +621,7 @@ private final class MenuBarRuntime {
         let initialMenuConfigSnapshot = MenuBarConfigSnapshot(
             shortcutIdentifier: primaryShortcut.identifier,
             rewriteMode: rewriteMode,
+            asrModel: resolvedASRModel,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
             preferredMicrophone: preferredMicrophone,
@@ -738,6 +749,10 @@ private final class MenuBarRuntime {
                 try configStore.persistRewriteMode(mode)
                 menuConfigSnapshot.rewriteMode = mode
                 logger.log("menu_settings_updated key=rewrite_mode value=\(mode.rawValue)")
+            case .setASRModel(let model):
+                try configStore.persistASRModel(model)
+                menuConfigSnapshot.asrModel = model
+                logger.log("menu_settings_updated key=asr_model value=\"\(escapeLogValue(model))\"")
             case .setOpenRouterModel(let model):
                 try configStore.persistOpenRouterModel(model)
                 menuConfigSnapshot.openRouterModel = model

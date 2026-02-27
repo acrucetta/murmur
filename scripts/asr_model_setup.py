@@ -82,17 +82,25 @@ def ensure_moonshine_assets(spec: ASRModelSpec, python_bin: str, skip_download: 
         return
 
     arch, language = infer_moonshine_arch_and_language(spec.setup_model_ref)
-    run_command(
-        [
-            python_bin,
-            "-m",
-            "moonshine_voice.download",
-            "--language",
-            language,
-            "--model-arch",
-            arch,
-        ]
-    )
+    moonshine_voice = importlib.import_module("moonshine_voice")
+    moonshine_download = importlib.import_module("moonshine_voice.download")
+    moonshine_download_file = importlib.import_module("moonshine_voice.download_file")
+
+    string_to_model_arch = getattr(moonshine_voice, "string_to_model_arch")
+    find_model_info = getattr(moonshine_download, "find_model_info")
+    get_components_for_model_info = getattr(moonshine_download, "get_components_for_model_info")
+    download_model_from_info = getattr(moonshine_download, "download_model_from_info")
+    get_cache_dir = getattr(moonshine_download_file, "get_cache_dir")
+
+    model_arch = string_to_model_arch(arch)
+    model_info = find_model_info(language=language, model_arch=model_arch)
+    cache_dir = pathlib.Path(get_cache_dir())
+    model_root = cache_dir / model_info["download_url"].replace("https://", "")
+    components = get_components_for_model_info(model_info)
+    if all((model_root / component).exists() for component in components):
+        return
+
+    download_model_from_info(model_info)
 
 
 def _huggingface_snapshot_download(model_id: str, local_files_only: bool) -> bool:

@@ -82,6 +82,13 @@ class ASRModelCatalogTests(unittest.TestCase):
         self.assertIn("qwen3-asr-0.6b", aliases)
         self.assertIn("qwen3-asr-1.7b", aliases)
 
+    def test_moonshine_base_alias_resolves_to_base_en(self) -> None:
+        spec = resolve_model_spec("moonshine-base", root_dir=self.root_dir)
+
+        self.assertEqual(spec.provider, "moonshine")
+        self.assertEqual(spec.runtime_model, "base-en")
+        self.assertEqual(spec.setup_kind, "moonshine")
+
 
 if __name__ == "__main__":
     unittest.main()

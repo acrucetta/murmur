@@ -4,6 +4,7 @@ import AppKit
 public struct MenuBarSettingsSnapshot {
     public let shortcutIdentifier: String
     public let rewriteMode: TranscriptRewriteMode
+    public let asrModel: String
     public let openRouterModel: String
     public let pauseMediaWhileRecording: Bool
     public let preferredMicrophone: String?
@@ -12,6 +13,7 @@ public struct MenuBarSettingsSnapshot {
     public init(
         shortcutIdentifier: String,
         rewriteMode: TranscriptRewriteMode,
+        asrModel: String,
         openRouterModel: String,
         pauseMediaWhileRecording: Bool,
         preferredMicrophone: String?,
@@ -19,6 +21,7 @@ public struct MenuBarSettingsSnapshot {
     ) {
         self.shortcutIdentifier = shortcutIdentifier
         self.rewriteMode = rewriteMode
+        self.asrModel = asrModel
         self.openRouterModel = openRouterModel
         self.pauseMediaWhileRecording = pauseMediaWhileRecording
         self.preferredMicrophone = preferredMicrophone
@@ -28,6 +31,7 @@ public struct MenuBarSettingsSnapshot {
 
 public enum MenuBarSettingsAction {
     case setRewriteMode(TranscriptRewriteMode)
+    case setASRModel(String)
     case setOpenRouterModel(String)
     case setPauseMediaWhileRecording(Bool)
     case setPreferredMicrophone(String?)
@@ -39,6 +43,7 @@ public final class MenuBarController: NSObject {
     private var menu: NSMenu?
     private var shortcutItem: NSMenuItem?
     private var rewriteModeItem: NSMenuItem?
+    private var asrModelItem: NSMenuItem?
     private var modelItem: NSMenuItem?
     private var pauseMediaItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
@@ -135,6 +140,10 @@ public final class MenuBarController: NSObject {
         menu.addItem(rewriteModeItem)
         self.rewriteModeItem = rewriteModeItem
 
+        let asrModelItem = NSMenuItem(title: "ASR Model: -", action: nil, keyEquivalent: "")
+        menu.addItem(asrModelItem)
+        self.asrModelItem = asrModelItem
+
         let modelItem = NSMenuItem(title: "Smart Model: -", action: nil, keyEquivalent: "")
         menu.addItem(modelItem)
         self.modelItem = modelItem
@@ -165,6 +174,7 @@ public final class MenuBarController: NSObject {
         guard let snapshot = settingsSnapshot else {
             shortcutItem?.title = "Shortcut: -"
             rewriteModeItem?.title = "Rewrite Mode: -"
+            asrModelItem?.title = "ASR Model: -"
             modelItem?.title = "Smart Model: -"
             pauseMediaItem?.state = .off
             pauseMediaItem?.isEnabled = false
@@ -175,12 +185,29 @@ public final class MenuBarController: NSObject {
         shortcutItem?.title = "Shortcut: \(snapshot.shortcutIdentifier)"
         rewriteModeItem?.title = "Rewrite Mode: \(snapshot.rewriteMode.rawValue)"
         rewriteModeItem?.submenu = makeRewriteModeSubmenu(snapshot: snapshot)
+        asrModelItem?.title = "ASR Model: \(snapshot.asrModel)"
+        asrModelItem?.submenu = makeASRModelSubmenu(snapshot: snapshot)
         modelItem?.title = "Smart Model: \(snapshot.openRouterModel)"
         modelItem?.submenu = makeModelSubmenu(snapshot: snapshot)
         pauseMediaItem?.state = snapshot.pauseMediaWhileRecording ? .on : .off
         pauseMediaItem?.isEnabled = true
         microphoneItem?.title = "Microphone: \(displayMicrophoneLabel(for: snapshot))"
         microphoneItem?.submenu = makeMicrophoneSubmenu(snapshot: snapshot)
+    }
+
+    private func makeASRModelSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
+        let submenu = NSMenu(title: "ASR Model")
+        let choices = CLIConfigOptionCatalog.asrModelChoices(current: snapshot.asrModel)
+
+        for choice in choices where choice != CLIConfigOptionCatalog.customEntryLabel {
+            let item = NSMenuItem(title: choice, action: #selector(selectASRModel(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice
+            item.state = choice == snapshot.asrModel ? .on : .off
+            submenu.addItem(item)
+        }
+
+        return submenu
     }
 
     private func makeRewriteModeSubmenu(snapshot: MenuBarSettingsSnapshot) -> NSMenu {
@@ -305,6 +332,13 @@ public final class MenuBarController: NSObject {
             return
         }
         onSettingsAction?(.setOpenRouterModel(model))
+    }
+
+    @objc private func selectASRModel(_ sender: NSMenuItem) {
+        guard let model = sender.representedObject as? String else {
+            return
+        }
+        onSettingsAction?(.setASRModel(model))
     }
 
     @objc private func togglePauseMedia(_ sender: NSMenuItem) {

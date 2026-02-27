@@ -60,6 +60,11 @@ trim() {
   printf '%s' "$value"
 }
 
+to_lower() {
+  local value="$1"
+  printf '%s' "$value" | tr '[:upper:]' '[:lower:]'
+}
+
 read_file_value() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -90,7 +95,7 @@ write_secret_config_value() {
 normalize_rewrite_mode() {
   local mode="$1"
   mode="$(trim "$mode")"
-  mode="${mode,,}"
+  mode="$(to_lower "$mode")"
   case "$mode" in
     literal|smart)
       printf '%s\n' "$mode"
@@ -105,7 +110,7 @@ normalize_rewrite_mode() {
 normalize_boolean() {
   local value="$1"
   value="$(trim "$value")"
-  value="${value,,}"
+  value="$(to_lower "$value")"
   case "$value" in
     1|true|yes|on)
       printf '%s\n' "true"
