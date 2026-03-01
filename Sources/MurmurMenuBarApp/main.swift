@@ -41,6 +41,9 @@ struct MurmurMenuBarApp {
         if let warning = arguments.pauseMediaWarning {
             emit("warning=\(warning)")
         }
+        if let warning = arguments.toggleModeWarning {
+            emit("warning=\(warning)")
+        }
         if let warning = arguments.microphoneWarning {
             emit("warning=\(warning)")
         }
@@ -58,6 +61,7 @@ struct MurmurMenuBarApp {
             openRouterAPIKey: arguments.openRouterAPIKey,
             openRouterRequestTimeoutSeconds: arguments.openRouterRequestTimeoutSeconds,
             pauseMediaWhileRecording: arguments.pauseMediaWhileRecording,
+            toggleMode: arguments.toggleMode,
             preferredMicrophone: arguments.preferredMicrophone
         )
 
@@ -95,6 +99,8 @@ private struct Arguments {
     let openRouterTimeoutWarning: String?
     let pauseMediaWhileRecording: Bool
     let pauseMediaWarning: String?
+    let toggleMode: Bool
+    let toggleModeWarning: String?
     let preferredMicrophone: String?
     let microphoneWarning: String?
 
@@ -116,6 +122,10 @@ private struct Arguments {
         )
         let pauseMediaResolution = resolvePauseMediaWhileRecording(
             explicit: value(after: "--pause-media-while-recording", in: rawArgs),
+            environment: environment
+        )
+        let toggleModeResolution = resolveToggleMode(
+            explicit: value(after: "--toggle-mode", in: rawArgs),
             environment: environment
         )
         let microphoneResolution = resolvePreferredMicrophone(
@@ -152,6 +162,8 @@ private struct Arguments {
             openRouterTimeoutWarning: openRouterTimeoutResolution.warning,
             pauseMediaWhileRecording: pauseMediaResolution.enabled,
             pauseMediaWarning: pauseMediaResolution.warning,
+            toggleMode: toggleModeResolution.enabled,
+            toggleModeWarning: toggleModeResolution.warning,
             preferredMicrophone: microphoneResolution.microphone,
             microphoneWarning: microphoneResolution.warning
         )
@@ -341,6 +353,35 @@ private struct Arguments {
         return (false, nil)
     }
 
+    private static func resolveToggleMode(
+        explicit: String?,
+        environment: [String: String]
+    ) -> (enabled: Bool, warning: String?) {
+        if let explicit {
+            guard let parsed = parseBool(explicit) else {
+                return (
+                    false,
+                    "invalid toggle-mode value '\(explicit)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        if let envValue = environment["MURMUR_TOGGLE_MODE"],
+           !envValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            guard let parsed = parseBool(envValue) else {
+                return (
+                    false,
+                    "invalid MURMUR_TOGGLE_MODE '\(envValue)'; expected true|false"
+                )
+            }
+            return (parsed, nil)
+        }
+
+        return (false, nil)
+    }
+
     private static func resolvePreferredMicrophone(
         explicit: String?,
         environment: [String: String]
@@ -398,6 +439,7 @@ private struct MenuBarConfigSnapshot {
     var asrModel: String
     var openRouterModel: String
     var pauseMediaWhileRecording: Bool
+    var toggleMode: Bool
     var preferredMicrophone: String?
     var availableMicrophones: [AudioInputDevice]
 
@@ -408,6 +450,7 @@ private struct MenuBarConfigSnapshot {
             asrModel: asrModel,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
+            toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
             availableMicrophones: availableMicrophones
         )
@@ -422,6 +465,7 @@ private struct MurmurConfigStore {
     private var rewriteModePath: String { "\(configDirectory)/rewrite_mode.txt" }
     private var openRouterModelPath: String { "\(configDirectory)/openrouter_model.txt" }
     private var pauseMediaPath: String { "\(configDirectory)/pause_media_while_recording.txt" }
+    private var toggleModePath: String { "\(configDirectory)/toggle_mode.txt" }
     private var microphonePath: String { "\(configDirectory)/microphone.txt" }
 
     init(configDirectory: String, fileManager: FileManager = .default) {
@@ -451,6 +495,10 @@ private struct MurmurConfigStore {
 
     func persistPauseMediaWhileRecording(_ enabled: Bool) throws {
         try writeValue(enabled ? "true" : "false", to: pauseMediaPath)
+    }
+
+    func persistToggleMode(_ enabled: Bool) throws {
+        try writeValue(enabled ? "true" : "false", to: toggleModePath)
     }
 
     func persistPreferredMicrophone(_ microphone: String?) throws {
@@ -520,6 +568,7 @@ private final class MenuBarRuntime {
     private let bridge: HotkeySessionBridge
     private let overlayController: RecordingOverlayController
     private let overlayPreviewState: OverlayPreviewState?
+    private let primaryShortcut: HotkeyShortcut
     private let configStore: MurmurConfigStore
     private let recordingMediaController: SwitchableRecordingMediaController
     private var menuConfigSnapshot: MenuBarConfigSnapshot
@@ -537,6 +586,7 @@ private final class MenuBarRuntime {
         openRouterAPIKey: String?,
         openRouterRequestTimeoutSeconds: TimeInterval,
         pauseMediaWhileRecording: Bool,
+        toggleMode: Bool,
         preferredMicrophone: String?
     ) {
         self.menuBarController = menuBarController
@@ -544,10 +594,13 @@ private final class MenuBarRuntime {
 
         let primaryShortcut = hotkeyShortcuts.first ?? .defaultPushToTalk
         let overlayController = RecordingOverlayController(
-            promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut),
+            promptText: HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: toggleMode),
             previewState: overlayPreviewState
         )
-        let statusUI = MenuBarStatusUI(menuBarController: menuBarController)
+        let statusUI = MenuBarStatusUI(
+            menuBarController: menuBarController,
+            overlayController: overlayController
+        )
         let logger = MenuBarLogger()
         let configStore = MurmurConfigStore(configDirectory: configDirectory)
         let audioCapture = AudioCapture(preferredInputDevice: preferredMicrophone)
@@ -592,9 +645,6 @@ private final class MenuBarRuntime {
             },
             onRecordingStopped: {
                 overlayController.update(state: .finalizing)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-                    overlayController.update(state: .idle)
-                }
             }
         )
         let initialRecordingMediaController = Self.makeRecordingMediaController(
@@ -604,6 +654,7 @@ private final class MenuBarRuntime {
         let recordingMediaController = SwitchableRecordingMediaController(
             initialController: initialRecordingMediaController
         )
+        logger.log("toggle_mode enabled=\(toggleMode)")
         if let preferredMicrophone {
             logger.log("microphone_selected value=\"\(escapeLogValue(preferredMicrophone))\"")
         } else {
@@ -624,6 +675,7 @@ private final class MenuBarRuntime {
             asrModel: resolvedASRModel,
             openRouterModel: openRouterModel,
             pauseMediaWhileRecording: pauseMediaWhileRecording,
+            toggleMode: toggleMode,
             preferredMicrophone: preferredMicrophone,
             availableMicrophones: availableMicrophones
         )
@@ -645,14 +697,23 @@ private final class MenuBarRuntime {
         let hotkeyController = HotkeyController(shortcuts: hotkeyShortcuts)
         let bridge = HotkeySessionBridge(
             hotkeyController: hotkeyController,
-            sessionEventHandler: orchestrator
+            sessionEventHandler: orchestrator,
+            toggleMode: toggleMode
         )
 
-        overlayController.onStopRequested = { [weak orchestrator] in
+        overlayController.onStopRequested = { [weak orchestrator, weak bridge] in
+            bridge?.resetToggleState()
             orchestrator?.handle(.shortcutReleased(.init(timestamp: Date())))
         }
         overlayController.onDismissRequested = {
             logger.log("overlay_dismissed")
+        }
+        overlayController.onStartRequested = { [weak orchestrator, weak bridge] in
+            // This allows starting dictation by clicking the overlay.
+            // Note: If "Toggle Mode" is enabled for the hotkey, the hotkey's toggle
+            // state could become out of sync. The stop-click is designed to reset this,
+            // ensuring consistent behavior.
+            orchestrator?.handle(.shortcutPressed(.init(timestamp: Date())))
         }
 
         self.statusUI = statusUI
@@ -663,6 +724,7 @@ private final class MenuBarRuntime {
         self.hotkeyController = hotkeyController
         self.bridge = bridge
         self.overlayController = overlayController
+        self.primaryShortcut = primaryShortcut
         self.configStore = configStore
         self.recordingMediaController = recordingMediaController
         menuConfigSnapshot = initialMenuConfigSnapshot
@@ -767,6 +829,15 @@ private final class MenuBarRuntime {
                 recordingMediaController.setController(
                     Self.makeRecordingMediaController(enabled: enabled, logger: logger)
                 )
+            case .setToggleMode(let enabled):
+                try configStore.persistToggleMode(enabled)
+                menuConfigSnapshot.toggleMode = enabled
+                bridge.toggleMode = enabled
+                bridge.resetToggleState()
+                overlayController.updatePromptText(
+                    HotkeyShortcutPresentation.overlayPrompt(for: primaryShortcut, toggleMode: enabled)
+                )
+                logger.log("menu_settings_updated key=toggle_mode value=\(enabled)")
             case .setPreferredMicrophone(let microphone):
                 try configStore.persistPreferredMicrophone(microphone)
                 menuConfigSnapshot.preferredMicrophone = microphone
@@ -830,31 +901,32 @@ private final class MenuBarRuntime {
 
 private final class MenuBarStatusUI: StatusPresenting {
     private weak var menuBarController: MenuBarController?
+    private weak var overlayController: RecordingOverlayController?
     var onError: ((FailureCode) -> Void)?
 
-    init(menuBarController: MenuBarController) {
+    init(
+        menuBarController: MenuBarController,
+        overlayController: RecordingOverlayController
+    ) {
         self.menuBarController = menuBarController
+        self.overlayController = overlayController
     }
 
     func update(state: SessionState) {
         let menuBarController = self.menuBarController
+        let overlayController = self.overlayController
         Task { @MainActor in
             menuBarController?.setState(state)
-        }
-    }
-
-    func showPermissionPrompt(_ snapshot: PermissionSnapshot) {
-        let missing = missingPermissions(from: snapshot).joined(separator: ", ")
-        let menuBarController = self.menuBarController
-        Task { @MainActor in
-            menuBarController?.setLastErrorMessage("missing permissions: \(missing)")
+            overlayController?.update(state: state)
         }
     }
 
     func showError(_ error: FailureCode) {
         let menuBarController = self.menuBarController
+        let overlayController = self.overlayController
         Task { @MainActor in
             menuBarController?.setLastErrorMessage(error.rawValue)
+            overlayController?.update(state: .error(error))
         }
         onError?(error)
     }
@@ -863,6 +935,14 @@ private final class MenuBarStatusUI: StatusPresenting {
         let menuBarController = self.menuBarController
         Task { @MainActor in
             menuBarController?.setPartialTranscript(text)
+        }
+    }
+
+    func showPermissionPrompt(_ snapshot: PermissionSnapshot) {
+        let missing = missingPermissions(from: snapshot).joined(separator: ", ")
+        let menuBarController = self.menuBarController
+        Task { @MainActor in
+            menuBarController?.setLastErrorMessage("missing permissions: \(missing)")
         }
     }
 
@@ -942,11 +1022,12 @@ private enum OverlayPreviewState: String {
 @MainActor
 private final class RecordingOverlayController {
     var onStopRequested: (() -> Void)?
+    var onStartRequested: (() -> Void)?
     var onDismissRequested: (() -> Void)?
 
     private let panel: NSPanel
     private let overlayView: RecordingOverlayView
-    private let promptText: String
+    private var promptText: String
     private let previewState: OverlayPreviewState?
 
     private var currentState: SessionState = .idle
@@ -986,6 +1067,9 @@ private final class RecordingOverlayController {
         overlayView.onStopTap = { [weak self] in
             self?.handleStopTap()
         }
+        overlayView.onStartTap = { [weak self] in
+            self?.handleStartTap()
+        }
     }
 
     func start() {
@@ -996,6 +1080,11 @@ private final class RecordingOverlayController {
         attachScreenObserverIfNeeded()
         ensureHoverTimerIfNeeded()
         updateIdleHoverFromPointer()
+    }
+
+    func updatePromptText(_ text: String) {
+        promptText = text
+        overlayView.updatePrompt(text)
     }
 
     func stop() {
@@ -1040,6 +1129,12 @@ private final class RecordingOverlayController {
             overlayView.setIdleHover(false, animated: false)
         }
         apply(state: state, animated: true)
+
+        if case .error = state {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+                self?.update(state: .idle)
+            }
+        }
     }
 
     func updateAudioLevel(from frame: AudioFrame) {
@@ -1174,6 +1269,7 @@ private final class RecordingOverlayController {
         let pointer = NSEvent.mouseLocation
         let hoverArea = overlayView.idleHoverArea(in: panel)
         overlayView.setIdleHover(hoverArea.contains(pointer), animated: true)
+        panel.ignoresMouseEvents = !overlayView.allowsActionClicks
     }
 
     private func handleDismissTap() {
@@ -1202,6 +1298,13 @@ private final class RecordingOverlayController {
         onStopRequested?()
     }
 
+    private func handleStartTap() {
+        guard case .idle = currentState else {
+            return
+        }
+        onStartRequested?()
+    }
+
     private func positionPanel() {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else {
             return
@@ -1219,6 +1322,7 @@ private final class RecordingOverlayController {
 private final class RecordingOverlayView: NSView {
     var onDismissTap: (() -> Void)?
     var onStopTap: (() -> Void)?
+    var onStartTap: (() -> Void)?
 
     private let promptPill = OverlayCapsuleView()
     private let promptLabel = NSTextField(labelWithString: "")
@@ -1226,6 +1330,7 @@ private final class RecordingOverlayView: NSView {
     private let dismissBadge = OverlayBadgeView(symbolName: "xmark")
     private let stopBadge = OverlayBadgeView(symbolName: "stop.fill")
     private let meterView = OverlayMeterWaveView()
+    private let recordBadge = OverlayBadgeView(symbolName: "mic.fill")
 
     private var activityWidthConstraint: NSLayoutConstraint?
     private var activityHeightConstraint: NSLayoutConstraint?
@@ -1250,7 +1355,7 @@ private final class RecordingOverlayView: NSView {
     }
 
     var allowsActionClicks: Bool {
-        !dismissBadge.isHidden && !stopBadge.isHidden
+        !recordBadge.isHidden || !dismissBadge.isHidden || !stopBadge.isHidden
     }
 
     func updatePrompt(_ text: String) {
@@ -1323,10 +1428,12 @@ private final class RecordingOverlayView: NSView {
 
         dismissBadge.translatesAutoresizingMaskIntoConstraints = false
         stopBadge.translatesAutoresizingMaskIntoConstraints = false
+        recordBadge.translatesAutoresizingMaskIntoConstraints = false
         meterView.translatesAutoresizingMaskIntoConstraints = false
 
         activityPill.addSubview(dismissBadge)
         activityPill.addSubview(meterView)
+        activityPill.addSubview(recordBadge)
         activityPill.addSubview(stopBadge)
 
         dismissBadge.setStyle(
@@ -1337,11 +1444,18 @@ private final class RecordingOverlayView: NSView {
             fill: NSColor.systemRed.withAlphaComponent(0.70),
             symbolColor: NSColor.white.withAlphaComponent(0.86)
         )
+        recordBadge.setStyle(
+            fill: NSColor.systemGreen.withAlphaComponent(0.70),
+            symbolColor: NSColor.white.withAlphaComponent(0.86)
+        )
         dismissBadge.onTap = { [weak self] in
             self?.onDismissTap?()
         }
         stopBadge.onTap = { [weak self] in
             self?.onStopTap?()
+        }
+        recordBadge.onTap = { [weak self] in
+            self?.onStartTap?()
         }
 
         activityWidthConstraint = activityPill.widthAnchor.constraint(equalToConstant: 88)
@@ -1379,6 +1493,10 @@ private final class RecordingOverlayView: NSView {
             meterView.centerXAnchor.constraint(equalTo: activityPill.centerXAnchor),
             meterView.centerYAnchor.constraint(equalTo: activityPill.centerYAnchor),
 
+            recordBadge.centerXAnchor.constraint(equalTo: activityPill.centerXAnchor),
+            recordBadge.centerYAnchor.constraint(equalTo: activityPill.centerYAnchor),
+            recordBadge.widthAnchor.constraint(equalToConstant: 26),
+            recordBadge.heightAnchor.constraint(equalToConstant: 26),
             dismissBadge.widthAnchor.constraint(equalToConstant: 26),
             dismissBadge.heightAnchor.constraint(equalToConstant: 26),
 
@@ -1393,6 +1511,7 @@ private final class RecordingOverlayView: NSView {
         promptPill.isHidden = !style.showPrompt
         dismissBadge.isHidden = !style.showBadges
         stopBadge.isHidden = !style.showBadges
+        recordBadge.isHidden = !style.showRecordBadge
         meterView.isHidden = !style.showMeter
         meterView.setActive(style.meterActive)
 
@@ -1447,12 +1566,13 @@ private final class RecordingOverlayView: NSView {
                     showPrompt: true,
                     promptMessage: promptText,
                     promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                    showRecordBadge: true,
                     showBadges: false,
-                    showMeter: true,
+                    showMeter: false,
                     meterActive: false,
-                    activityWidth: 96,
-                    activityHeight: 26,
-                    meterWidth: 56,
+                    activityWidth: 34,
+                    activityHeight: 34,
+                    meterWidth: 0,
                     meterHeight: 10,
                     leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
                     leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
@@ -1468,6 +1588,7 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: promptText,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
@@ -1489,11 +1610,12 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
                 activityWidth: 160,
-                activityHeight: 30,
+                activityHeight: 34,
                 meterWidth: 76,
                 meterHeight: 14,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
@@ -1510,11 +1632,12 @@ private final class RecordingOverlayView: NSView {
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: true,
                 showMeter: true,
                 meterActive: true,
                 activityWidth: 150,
-                activityHeight: 28,
+                activityHeight: 32,
                 meterWidth: 70,
                 meterHeight: 12,
                 leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
@@ -1528,9 +1651,32 @@ private final class RecordingOverlayView: NSView {
             )
         case .inserting:
             return OverlayStyle(
+                showPrompt: true,
+                promptMessage: "Processing...",
+                promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
+                showBadges: false,
+                showMeter: false,
+                meterActive: false,
+                activityWidth: 0,
+                activityHeight: 0,
+                meterWidth: 0,
+                meterHeight: 0,
+                leftBadgeFill: .clear,
+                leftBadgeSymbol: .clear,
+                rightBadgeFill: .clear,
+                rightBadgeSymbol: .clear,
+                activityFill: .clear,
+                activityBorder: .clear,
+                glowColor: .clear,
+                glowRadius: 0
+            )
+        case .error:
+            return OverlayStyle(
                 showPrompt: false,
                 promptMessage: nil,
                 promptTextColor: NSColor.white.withAlphaComponent(0.80),
+                showRecordBadge: false,
                 showBadges: false,
                 showMeter: false,
                 meterActive: false,
@@ -1547,27 +1693,6 @@ private final class RecordingOverlayView: NSView {
                 glowColor: NSColor.systemPink,
                 glowRadius: 0
             )
-        case .error:
-            return OverlayStyle(
-                showPrompt: false,
-                promptMessage: "Dictation failed. Try again.",
-                promptTextColor: NSColor.systemOrange.withAlphaComponent(0.80),
-                showBadges: false,
-                showMeter: false,
-                meterActive: false,
-                activityWidth: 40,
-                activityHeight: 8,
-                meterWidth: 34,
-                meterHeight: 8,
-                leftBadgeFill: NSColor.white.withAlphaComponent(0.10),
-                leftBadgeSymbol: NSColor.white.withAlphaComponent(0.60),
-                rightBadgeFill: NSColor.systemRed.withAlphaComponent(0.66),
-                rightBadgeSymbol: NSColor.white.withAlphaComponent(0.84),
-                activityFill: NSColor.white.withAlphaComponent(0.28),
-                activityBorder: NSColor.systemOrange.withAlphaComponent(0.32),
-                glowColor: NSColor.systemOrange,
-                glowRadius: 0
-            )
         }
     }
 }
@@ -1576,6 +1701,7 @@ private struct OverlayStyle {
     let showPrompt: Bool
     let promptMessage: String?
     let promptTextColor: NSColor
+    let showRecordBadge: Bool
     let showBadges: Bool
     let showMeter: Bool
     let meterActive: Bool

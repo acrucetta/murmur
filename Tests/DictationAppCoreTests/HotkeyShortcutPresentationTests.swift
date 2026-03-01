@@ -25,4 +25,13 @@ struct HotkeyShortcutPresentationTests {
             HotkeyShortcutPresentation.overlayPrompt(for: shortcut!) == "Hold ctrl + shift + space to start dictating"
         )
     }
+
+    @Test
+    func buildsToggleModeOverlayPromptText() {
+        let shortcut = HotkeyShortcut.parse(identifier: "ctrl+shift+space")
+        #expect(shortcut != nil)
+        #expect(
+            HotkeyShortcutPresentation.overlayPrompt(for: shortcut!, toggleMode: true) == "Press ctrl + shift + space to start dictating"
+        )
+    }
 }

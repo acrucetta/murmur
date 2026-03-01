@@ -7,6 +7,7 @@ public struct MenuBarSettingsSnapshot {
     public let asrModel: String
     public let openRouterModel: String
     public let pauseMediaWhileRecording: Bool
+    public let toggleMode: Bool
     public let preferredMicrophone: String?
     public let availableMicrophones: [AudioInputDevice]
 
@@ -16,6 +17,7 @@ public struct MenuBarSettingsSnapshot {
         asrModel: String,
         openRouterModel: String,
         pauseMediaWhileRecording: Bool,
+        toggleMode: Bool,
         preferredMicrophone: String?,
         availableMicrophones: [AudioInputDevice]
     ) {
@@ -24,6 +26,7 @@ public struct MenuBarSettingsSnapshot {
         self.asrModel = asrModel
         self.openRouterModel = openRouterModel
         self.pauseMediaWhileRecording = pauseMediaWhileRecording
+        self.toggleMode = toggleMode
         self.preferredMicrophone = preferredMicrophone
         self.availableMicrophones = availableMicrophones
     }
@@ -34,6 +37,7 @@ public enum MenuBarSettingsAction {
     case setASRModel(String)
     case setOpenRouterModel(String)
     case setPauseMediaWhileRecording(Bool)
+    case setToggleMode(Bool)
     case setPreferredMicrophone(String?)
 }
 
@@ -46,6 +50,7 @@ public final class MenuBarController: NSObject {
     private var asrModelItem: NSMenuItem?
     private var modelItem: NSMenuItem?
     private var pauseMediaItem: NSMenuItem?
+    private var toggleModeItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var settingsSnapshot: MenuBarSettingsSnapshot?
 
@@ -157,6 +162,15 @@ public final class MenuBarController: NSObject {
         menu.addItem(pauseMediaItem)
         self.pauseMediaItem = pauseMediaItem
 
+        let toggleModeItem = NSMenuItem(
+            title: "Toggle Mode (Press to Start/Stop)",
+            action: #selector(toggleToggleMode(_:)),
+            keyEquivalent: ""
+        )
+        toggleModeItem.target = self
+        menu.addItem(toggleModeItem)
+        self.toggleModeItem = toggleModeItem
+
         let microphoneItem = NSMenuItem(title: "Microphone: -", action: nil, keyEquivalent: "")
         menu.addItem(microphoneItem)
         self.microphoneItem = microphoneItem
@@ -178,6 +192,8 @@ public final class MenuBarController: NSObject {
             modelItem?.title = "Smart Model: -"
             pauseMediaItem?.state = .off
             pauseMediaItem?.isEnabled = false
+            toggleModeItem?.state = .off
+            toggleModeItem?.isEnabled = false
             microphoneItem?.title = "Microphone: -"
             return
         }
@@ -191,6 +207,8 @@ public final class MenuBarController: NSObject {
         modelItem?.submenu = makeModelSubmenu(snapshot: snapshot)
         pauseMediaItem?.state = snapshot.pauseMediaWhileRecording ? .on : .off
         pauseMediaItem?.isEnabled = true
+        toggleModeItem?.state = snapshot.toggleMode ? .on : .off
+        toggleModeItem?.isEnabled = true
         microphoneItem?.title = "Microphone: \(displayMicrophoneLabel(for: snapshot))"
         microphoneItem?.submenu = makeMicrophoneSubmenu(snapshot: snapshot)
     }
@@ -344,6 +362,11 @@ public final class MenuBarController: NSObject {
     @objc private func togglePauseMedia(_ sender: NSMenuItem) {
         let current = settingsSnapshot?.pauseMediaWhileRecording ?? false
         onSettingsAction?(.setPauseMediaWhileRecording(!current))
+    }
+
+    @objc private func toggleToggleMode(_ sender: NSMenuItem) {
+        let current = settingsSnapshot?.toggleMode ?? false
+        onSettingsAction?(.setToggleMode(!current))
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
